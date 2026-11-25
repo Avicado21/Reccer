@@ -1,0 +1,16 @@
+import { chromium } from "playwright";
+const b = await chromium.launch();
+const p = await b.newPage({ viewport: { width: 1280, height: 1000 } });
+const errs = []; p.on("pageerror", e => errs.push(e.message)); p.on("console", m => m.type()==="error" && errs.push(m.text()));
+await p.goto("file://" + process.cwd() + "/index.html?page=interview"); await p.waitForTimeout(600);
+await p.screenshot({ path: "interview.png" });
+await p.fill("#answer", "I am Priya Nair.");
+await p.click("text=Save and continue"); await p.waitForTimeout(300);
+const fq = await p.textContent(".question");
+await p.goto("file://" + process.cwd() + "/index.html?page=draft"); await p.waitForTimeout(600);
+await p.screenshot({ path: "draft.png", fullPage: false });
+const marks = await p.$$eval("mark.flag", m => m.map(x => x.textContent));
+await p.click("text=intern I have ever supervised"); await p.waitForTimeout(200);
+await p.screenshot({ path: "draft_source.png" });
+console.log(JSON.stringify({ followUpShown: fq, marks, errs }));
+await b.close();

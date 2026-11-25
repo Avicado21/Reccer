@@ -1,0 +1,93 @@
+/* Reccer design tokens.
+   Idea: the recommender's words are set in a book serif, like the letter they become.
+   The interface around them is a quiet sans. The one loud element is the proofreader's
+   highlighter, used ONLY to mark phrases the claim check could not trace to an answer.
+   Load fonts in index.html:
+   https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=Public+Sans:wght@400;500;600&display=swap */
+
+:root {
+  --paper: #f7f8fa;
+  --sheet: #ffffff;
+  --ink: #18212c;
+  --graphite: #5a6473;
+  --rule: #d8dde4;
+  --pen: #24478f;
+  --pen-ink: #ffffff;
+  --highlighter: #f4de6b;
+  --highlighter-ink: #18212c;
+  --danger: #a3261d;
+  --serif: "Source Serif 4", Georgia, serif;
+  --sans: "Public Sans", system-ui, sans-serif;
+  --measure: 62ch;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #12161c;
+    --sheet: #1a2029;
+    --ink: #e6e9ee;
+    --graphite: #a3acb9;
+    --rule: #2d3542;
+    --pen: #9db4ee;
+    --pen-ink: #12161c;
+    --highlighter: #e9cf5a;
+    --highlighter-ink: #12161c;
+    --danger: #f08a80;
+    color-scheme: dark;
+  }
+}
+
+.rc { background: var(--paper); color: var(--ink); font: 16px/1.5 var(--sans); min-height: 100vh; }
+.rc-wrap { max-width: var(--measure); margin: 0 auto; padding: 2.5rem 1.25rem 5rem; }
+.rc-wide { max-width: 72rem; }
+.rc h1 { font: 600 1.75rem/1.2 var(--serif); margin: 0 0 0.5rem; }
+.rc h2 { font: 600 1.25rem/1.3 var(--serif); margin: 2rem 0 0.5rem; }
+.rc p { margin: 0 0 1rem; }
+.rc .muted { color: var(--graphite); }
+.rc a { color: var(--pen); }
+
+.rc label { display: block; font-weight: 500; margin: 1.25rem 0 0.35rem; }
+.rc .hint { display: block; color: var(--graphite); font-size: 0.875rem; margin-top: 0.25rem; }
+.rc input, .rc textarea, .rc select {
+  width: 100%; box-sizing: border-box; font: inherit; color: var(--ink); background: var(--sheet);
+  border: 1px solid var(--rule); border-radius: 6px; padding: 0.6rem 0.75rem;
+}
+.rc textarea.answer { font: 1.125rem/1.6 var(--serif); min-height: 14rem; resize: vertical; padding: 1rem; }
+.rc :focus-visible { outline: 2px solid var(--pen); outline-offset: 2px; }
+
+.rc .actions { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 1.5rem; align-items: center; }
+.rc button { font: 500 0.95rem var(--sans); border-radius: 6px; padding: 0.6rem 1.1rem; cursor: pointer; border: 1px solid var(--rule); background: var(--sheet); color: var(--ink); }
+.rc button.primary { background: var(--pen); color: var(--pen-ink); border-color: var(--pen); }
+.rc button.quiet { border-color: transparent; background: transparent; color: var(--graphite); padding-inline: 0.5rem; }
+.rc button:disabled { opacity: 0.5; cursor: not-allowed; }
+.rc .error { color: var(--danger); margin-top: 1rem; }
+
+/* Interview: one question, large and calm. */
+.rc .progress { color: var(--graphite); font-size: 0.9rem; margin-bottom: 1.5rem; }
+.rc .question { font: 400 1.6rem/1.35 var(--serif); margin: 0 0 0.75rem; }
+.rc .opener { font: italic 1.05rem var(--serif); color: var(--graphite); margin-bottom: 1.25rem; }
+.rc .memory { background: var(--sheet); border-left: 3px solid var(--rule); padding: 0.75rem 1rem; margin: 0 0 1rem; color: var(--graphite); white-space: pre-wrap; }
+.rc .saved { color: var(--graphite); font-size: 0.85rem; }
+
+/* Draft: the letter on a sheet, flags in the margin like a proofreader's notes. */
+.rc .draft { display: grid; grid-template-columns: minmax(0, 40rem) minmax(0, 18rem); gap: 2.5rem; align-items: start; }
+@media (max-width: 860px) { .rc .draft { grid-template-columns: 1fr; } }
+.rc .sheet { background: var(--sheet); border: 1px solid var(--rule); padding: 2.5rem 2.75rem; font: 1.05rem/1.65 var(--serif); }
+.rc .sheet p { margin-bottom: 1.1em; }
+.rc .sentence { cursor: text; border-radius: 2px; }
+.rc .sentence:hover, .rc .sentence.active { background: color-mix(in srgb, var(--pen) 10%, transparent); }
+.rc mark.flag { background: var(--highlighter); color: var(--highlighter-ink); padding: 0 0.1em; }
+.rc .margin { font-size: 0.9rem; position: sticky; top: 1.5rem; }
+.rc .note { border-left: 3px solid var(--highlighter); padding: 0.25rem 0 0.25rem 0.75rem; margin-bottom: 0.9rem; }
+.rc .source { background: var(--sheet); border: 1px solid var(--rule); padding: 0.75rem 1rem; font: 0.95rem/1.55 var(--serif); }
+.rc .tabs { display: flex; gap: 0.25rem; border-bottom: 1px solid var(--rule); margin: 1.5rem 0; }
+.rc .tabs button { border: none; border-bottom: 2px solid transparent; border-radius: 0; background: none; }
+.rc .tabs button[aria-selected="true"] { border-bottom-color: var(--pen); color: var(--pen); }
+
+.rc .list { list-style: none; padding: 0; margin: 0; }
+.rc .list li { border-top: 1px solid var(--rule); padding: 0.9rem 0; display: flex; justify-content: space-between; gap: 1rem; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .rc .question { animation: rc-in 180ms ease-out; }
+  @keyframes rc-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+}

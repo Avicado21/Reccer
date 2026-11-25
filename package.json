@@ -1,0 +1,16 @@
+{
+  "name": "reccer-core",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "tsx --test tests/*.test.ts",
+    "typecheck": "tsc -p tsconfig.core.json",
+    "demo": "tsx scripts/demo.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "docx": "^9.5.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.8.0"
+  }
+}

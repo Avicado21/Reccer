@@ -1,0 +1,9 @@
+node_modules/
+demo-output/
+scripts/ui-preview/out.*
+*.png
+!docs/screenshots/*.png
+.dev.vars
+.env*
+.DS_Store
+reccer.zip
