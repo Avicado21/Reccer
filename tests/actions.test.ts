@@ -1,12 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import * as A from "../app/src/actions/logic";
+import * as A from "../src/actions/logic";
 import { intake, answers as fixtureAnswers, generatedQuestions } from "../fixtures/demo";
 import { makeWorld } from "./memoryRuntime";
 
 const tokenFrom = (text: string) => /token=([0-9a-f]{64})/.exec(text)![1];
 
-async function invitedWorld(llm?: (m: import("../app/src/core/index").ChatMessage[]) => string | null) {
+async function invitedWorld(llm?: (m: import("../src/core/index").ChatMessage[]) => string | null) {
   const w = makeWorld({ llm });
   const student = w.as("u_student", "jordan@example.com");
   const { requestId } = await A.createRequest(student, structuredClone(intake));

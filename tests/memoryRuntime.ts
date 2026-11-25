@@ -1,6 +1,6 @@
 // In-memory Runtime for testing action logic and permissions without the SDK.
-import type { Coll, Row, Runtime } from "../app/src/actions/logic";
-import type { ChatMessage } from "../app/src/core/index";
+import type { Coll, Row, Runtime } from "../src/actions/logic";
+import type { ChatMessage } from "../src/core/index";
 
 export function makeWorld(opts: { llm?: (m: ChatMessage[]) => string | null } = {}) {
   const tables: Record<Coll, Map<string, Row>> = {

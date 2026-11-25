@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildQuestionSet, defaultMiddle, deterministicAssembly, buildLetters } from "../app/src/core/index";
-import { letterToDocx, docxToBuffer } from "../app/src/core/export/docx";
+import { buildQuestionSet, defaultMiddle, deterministicAssembly, buildLetters } from "../src/core/index";
+import { letterToDocx, docxToBuffer } from "../src/core/export/docx";
 import { intake, answers } from "../fixtures/demo";
 
 test("docx export produces a valid Word file", async () => {

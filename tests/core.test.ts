@@ -4,7 +4,7 @@ import {
   buildQuestionSet, defaultMiddle, validateGeneratedQuestions, leadingReasons, parseModelJson,
   deterministicAssembly, validateAssembly, buildLetters, buildFormAnswers, claimCheck,
   stripFiller, inviteEmail, completionEmail, newInviteToken, hashToken, letterToPlainText,
-} from "../app/src/core/index";
+} from "../src/core/index";
 import { intake, answers, cheatingAssembly, generatedQuestions } from "../fixtures/demo";
 
 const questions = buildQuestionSet(intake, defaultMiddle(intake));

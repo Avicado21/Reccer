@@ -13,18 +13,18 @@ Owner: Avi (Avinash Kottakota). Stage 1 was built in a sandbox with no network, 
 
 | Area | Status | How it was checked |
 |---|---|---|
-| `app/src/core/` (question bank, leading-question validator, prompts, assembly, claim check, letters, form answers, invite tokens, emails, exports) | **Done, tested** | 13 unit tests, strict `tsc` |
-| `app/src/actions/logic.ts` (every server action and every permission rule) | **Done, tested** | 12 tests against an in-memory runtime, including the full student-to-recommender path |
+| `src/core/` (question bank, leading-question validator, prompts, assembly, claim check, letters, form answers, invite tokens, emails, exports) | **Done, tested** | 13 unit tests, strict `tsc` |
+| `src/actions/logic.ts` (every server action and every permission rule) | **Done, tested** | 12 tests against an in-memory runtime, including the full student-to-recommender path |
 | `.docx` export | **Done, tested** | Generates a valid Word file in Node; browser path uses `Packer.toBlob` |
-| Recommender pages (interview, draft) | **Renders** | Bundled with React and a mocked API, rendered in headless Chromium, zero console errors. See `docs/screenshots/` |
-| Student pages (home, new request), claim page | **Parses**, not rendered | esbuild syntax check only |
-| `app/src/actions/deepspace.ts` (SDK adapter) | **UNVERIFIED** | Written from docs excerpts. Every `SDK-VERIFY` line is a guess |
-| `app/src/schemas.ts` | **UNVERIFIED** | States intent; must be translated into real SDK schema syntax |
-| `app/src/lib/api.ts` (client transport) | **UNVERIFIED** | Placeholder `fetch`; replace with the SDK's server-action client |
-| Routing, auth boundary, `_layout.tsx` | **Not started** | Use the scaffold's |
-| Deploy | **Not started** | |
+| `src/actions/deepspace.ts` (SDK adapter) | **Done, verified locally** | Checked against installed deepspace 0.44.2 types; 9 adapter tests; real Anthropic + record calls under `deepspace test run` |
+| `src/schemas.ts`, `src/schemas/reccer-schemas.ts` | **Done** | Real `CollectionSchema`s, all client-none; scaffold `users` kept |
+| `src/lib/api.ts` (client transport) | **Done, verified locally** | `POST /api/actions/<name>` with `getAuthToken()` bearer |
+| Pages, routing, auth boundary, fonts | **Done, verified locally** | Under `src/pages/(app)/(protected)/`; three-account Playwright run (`tests/reccer.spec.ts`) |
+| Claim link across sign-in | **Done, verified locally** | `src/lib/claimReturn.ts`; simulated OAuth return in `tests/reccer.spec.ts` |
+| App registration | **Done** | `app_01M8AE4W9WV4VFCW5EZXKXCB0H` in `wrangler.toml` (`deepspace app init`) |
+| Deploy | **Not started** | Owner runs `DEPLOY.md` from their own checkout; source authority still unclaimed |
 
-`grep -rn "SDK-VERIFY" app/` lists every unverified spot.
+What was run and found is in `docs/AGENT_LOG.md`.
 
 ## 2. Architecture in one paragraph
 
@@ -33,7 +33,7 @@ All behavior lives in two SDK-free layers: `core/` (pure functions) and `actions
 ```
 student pages ─┐                       ┌─ core/ (pure, tested)
 recommender ───┼─ lib/api.ts ─▶ actions/deepspace.ts ─▶ actions/logic.ts ─┤
-pages          │   (SDK-VERIFY)     (SDK-VERIFY adapter)       (tested)     └─ Runtime: db, llm, email
+pages          │   (transport)      (SDK adapter)              (tested)     └─ Runtime: db, llm, email
 ```
 
 ## 3. Hard rules (do not break these while finishing)
@@ -57,7 +57,7 @@ Stop and deploy at the end of each step if time is short; each step leaves a wor
 
 **Step 1: scaffold and deploy empty (20 min).** `npm create deepspace@latest reccer`, then `npx deepspace deploy` immediately to catch deploy problems early. Choose the source authority deliberately: if the repo will live on GitHub, add the GitHub remote **before the first deploy** (the first deploy latches the source authority permanently; see the source-control docs).
 
-**Step 2: drop in the code (15 min).** Copy `app/src/core`, `app/src/actions`, `app/src/lib`, `app/src/styles`, `app/src/integrations.ts` into the scaffold's `src/`. Merge, do not replace, the scaffold's `src/integrations.ts`. Copy `tests/` and `fixtures/` and make `npm test` pass in the new repo (add `tsx` and `docx` as deps).
+**Step 2: drop in the code (15 min).** Copy `src/core`, `src/actions`, `src/lib`, `src/styles`, `src/integrations.ts` into the scaffold's `src/`. Merge, do not replace, the scaffold's `src/integrations.ts`. Copy `tests/` and `fixtures/` and make `npm test` pass in the new repo (add `tsx` and `docx` as deps).
 
 **Step 3: verify SDK facts (30 min). Read, don't guess.**
 - `npx deepspace integrations list`, then `integrations info openai/chat-completion` (or the catalog's Claude endpoint) and `integrations info email/send`. Fix `LLM_ENDPOINT`, `LLM_MODEL`, and the request/response shapes in `deepspace.ts`.
@@ -84,12 +84,12 @@ Stop and deploy at the end of each step if time is short; each step leaves a wor
 
 ```bash
 npm install            # tsx, typescript, docx, @types/node
-npm test               # 25 tests: core + actions + docx
-npm run typecheck      # strict tsc over core, logic, fixtures, tests
+npm test               # 34 tests: core + actions + docx + adapter
+npm run typecheck      # strict tsc over core, logic, fixtures, tests; then the whole app
 npm run demo           # end-to-end on fictional data -> demo-output/
 ```
 
-`tsconfig.core.json` is portable; it needs only the devDependencies in `package.json`.
+`tsconfig.core.json` covers the SDK-free code and tests. `npx deepspace test run e2e` runs the Playwright specs.
 
 ## 7. Files
 
@@ -103,5 +103,6 @@ npm run demo           # end-to-end on fictional data -> demo-output/
 | `docs/ACCEPTANCE_TESTS.md` | Manual two-account test script for the deployed app |
 | `docs/WRITEUP_DRAFT.md` | Submission writeup skeleton |
 | `docs/screenshots/` | Rendered interview and draft pages |
-| `app/src/` | The app code (see status table) |
+| `src/`, `worker.ts`, `wrangler.toml` | The DeepSpace app (see status table) |
+| `DEPLOY.md` | Exact commands for the first deploy from the owner's checkout |
 | `tests/`, `fixtures/`, `scripts/` | Tests, fictional data, demo and UI-preview harness |

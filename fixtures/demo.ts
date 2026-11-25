@@ -1,6 +1,6 @@
 // Fictional demo data. Do not replace with real people's letters or real employer details.
 
-import type { Answers, StudentIntake } from "../app/src/core/types";
+import type { Answers, StudentIntake } from "../src/core/types";
 
 export const intake: StudentIntake = {
   studentName: "Jordan Rivera",

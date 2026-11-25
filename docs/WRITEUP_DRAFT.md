@@ -8,7 +8,7 @@ Reccer: AI assisted, not AI generated letters of recommendation. A student sets 
 ## DeepSpace features and integrations
 **Platform features:** auth (Google or GitHub), records, server actions holding every permission check, per-user ownership, deploy.
 **Integrations:**
-- `<LLM endpoint>`, called twice: once to write neutral interview questions, once to clean up and order answers. Both outputs are validated by my code; both fall back to non-LLM paths; both are capped per request and behind sign-in.
+- `anthropic/chat-completion` (Claude Sonnet 5.5), called twice: once to write neutral interview questions, once to clean up and order answers. Both outputs are validated by my code; both fall back to non-LLM paths; both are capped per request and behind sign-in.
 - `email/send`: the invite to the recommender, and a status-only notice to the student.
 **Left out on purpose:** payments, presence, collaborative editing, messaging, Google Workspace, search. None improves a letter (see `docs/DECISIONS.md`).
 
@@ -27,3 +27,5 @@ Reccer: AI assisted, not AI generated letters of recommendation. A student sets 
 
 ## Unfinished, and what I would do next
 <from HANDOFF.md section 5, plus anything cut tonight>
+
+- **Invite links are bearer links until claimed.** Whoever signs in with the link first becomes the recommender; the signed-in email does not have to match the address the student entered, so a recommender can use a different Google or GitHub account. A forwarded link therefore works for whoever it was forwarded to. Once claimed, every other account is refused, and the student's own account is always refused. Next step: optionally require the email to match, with an owner-visible override.

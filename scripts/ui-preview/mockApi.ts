@@ -1,4 +1,4 @@
-import { buildQuestionSet, defaultMiddle, deterministicAssembly, validateAssembly, claimCheck, buildLetters, buildFormAnswers } from "../../app/src/core/index";
+import { buildQuestionSet, defaultMiddle, deterministicAssembly, validateAssembly, claimCheck, buildLetters, buildFormAnswers } from "../../src/core/index";
 import { intake, answers, cheatingAssembly } from "../../fixtures/demo";
 const qs = buildQuestionSet(intake, defaultMiddle(intake));
 const det = deterministicAssembly(qs, answers);

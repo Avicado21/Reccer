@@ -31,3 +31,13 @@ Verify everything here against `node_modules/deepspace/dist/*.d.ts`; installed t
 - `email/send` must send from `<app-name>@app.space`; app subdomains are rejected.
 - For streamed LLM output use `createDeepSpaceAI`. Reccer needs whole JSON responses, so the integration endpoint is the right tool.
 - Tests: one call per endpoint per run, never in loops, and mock the external boundary with `page.route`.
+
+## Verified against the installed SDK (deepspace 0.44.2, 2026-11-25)
+Where these differ from the notes above, these win. Details and sources: `docs/AGENT_LOG.md`.
+- Server actions: `export const actions: Record<string, ActionHandler<Env>>` in `src/actions/index.ts`, served at `POST /api/actions/<name>`. Context `{ userId, params, tools, env, callerJwt }`; the route verifies the Bearer JWT first. Web client: `fetch` with `Authorization: Bearer ${await getAuthToken()}`. There is no web `callAction`.
+- `tools.get/query/create/update` return `ActionResult`; envelopes are `{ recordId, data, ... }`. Booleans read back as 0/1, nulls are omitted, unknown fields are dropped, `uniqueOn` refuses duplicates.
+- LLM: `anthropic/chat-completion` (Anthropic Messages API body, `system` separate). Reccer uses `claude-sonnet-5-5`.
+- `email/send`: "Any from value is ignored". Mail comes from `DeepSpace Apps <notifications@updates.app.space>`; use `reply_to` for replies.
+- `vite build`, `vitest`, and `dev start` need a real app id: run `npx deepspace app init` once and commit `wrangler.toml`.
+- OAuth sign-in always lands on `/home`; query strings on the page you signed in from are lost (Reccer restores the claim token itself).
+- Test accounts: emails are global across developers; create with `--password-stdin`.

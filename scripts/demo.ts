@@ -4,8 +4,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import {
   buildQuestionSet, defaultMiddle, deterministicAssembly, validateAssembly, buildLetters,
   buildFormAnswers, claimCheck, inviteEmail, completionEmail, letterToPlainText, letterToPrintHtml,
-} from "../app/src/core/index";
-import { letterToDocx, docxToBuffer } from "../app/src/core/export/docx";
+} from "../src/core/index";
+import { letterToDocx, docxToBuffer } from "../src/core/export/docx";
 import { intake, answers, cheatingAssembly } from "../fixtures/demo";
 
 const out = "demo-output";

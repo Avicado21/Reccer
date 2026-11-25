@@ -7,12 +7,13 @@ A student sets up a request with their programs and due dates. Their recommender
 **Start here:** [`HANDOFF.md`](HANDOFF.md).
 
 ## How it is built
-- `app/src/core/`: pure TypeScript, no SDK. The question bank, the leading-question validator, the LLM prompts, assembly, the claim check, letters, exports, invite tokens.
-- `app/src/actions/logic.ts`: every server action and permission rule, written against a small `Runtime` interface so it is testable without the SDK.
-- `app/src/actions/deepspace.ts`, `app/src/schemas.ts`, `app/src/lib/api.ts`: the only files that touch the DeepSpace SDK.
+- `src/core/`: pure TypeScript, no SDK. The question bank, the leading-question validator, the LLM prompts, assembly, the claim check, letters, exports, invite tokens.
+- `src/actions/logic.ts`: every server action and permission rule, written against a small `Runtime` interface so it is testable without the SDK.
+- `src/actions/deepspace.ts`, `src/schemas.ts` (+ `src/schemas/reccer-schemas.ts`), `src/lib/api.ts`: the Reccer files that touch the DeepSpace SDK. The rest of the shell (`worker.ts`, `src/server/`, `src/pages/(app)/_layout.tsx`) is the DeepSpace starter scaffold.
+- Deploying: [`DEPLOY.md`](DEPLOY.md).
 
 ```bash
-npm install && npm test   # 25 tests
+npm install && npm test   # 34 tests
 npm run demo              # end-to-end on fictional data -> demo-output/
 ```
 
