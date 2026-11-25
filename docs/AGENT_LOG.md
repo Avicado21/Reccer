@@ -146,3 +146,23 @@ window.
   needed), source-authority check, tests, deploy, logs.
 - Spend during verification: four question generations and three assemblies on owner credits
   (`claude-sonnet-5-5`). No real email was sent; the dev outbox held it all.
+
+## Lane 2: product hardening and features (firstmate + Opus, Nov 25)
+Scope: SDK-free layers only (`core/`, `actions/logic.ts`, pages, `lib/useDictation.ts`, tests, docs), plus new method signatures in `lib/api.ts`. Lane 1 owns the adapter, schemas, and transport.
+
+- **Fixes, each with a regression test (`tests/regressions.test.ts`):** stable sentence ids, with edits and flags keyed by them and kept across a re-finish (dropped edits quoted in notes); the draft page uses ids instead of matching text; `claimInvite` writes, re-reads, and repairs, tested with forced interleaving (the test fails on the stage 1 code: both claims succeeded); autosave bound to its question (`core/autosave.ts`); ranking words judged in context.
+- **Features (`tests/features.test.ts`):** `getMyRequestIntake`, `updateIntake`, `cancelInvite`, capped resend, invite status in `listMyRequests`, advisory checks on edits, `remindersDue` plus `sendDeadlineReminders`.
+- **Verified:** `npm test` 49/49, `npm run typecheck` clean, `npm run demo` runs. Pages typechecked under strict `tsc` with React 18 types, then bundled against the real `logic.ts` on the in-memory runtime and driven in headless Chromium: new request to invite; reopen, edit, cancel, resend; autosave across fast question switches (one save per question, each to its own id); editing the second of two identical sentences; advisory notes and undo. Zero console errors. That harness lives outside the repo.
+- **Found while driving the pages:** the request form had no pronouns field, so saving a reopened request dropped `pronouns`, marked the questions stale, and cost an LLM generation. Fixed: the form has the field, and saves are built on the loaded intake.
+- **Not done here:** schema columns and action registration (listed in HANDOFF section 5 for lane 1), the cron wiring, deploy.
+
+### Lane 2, integration step (after lane 1 landed on main at 20639a7)
+- Rebased onto main with directory-rename detection: the core and logic changes moved cleanly to `src/`; pages, `api.ts`, and docs were resolved by hand (lane 1's import depths and real transport kept, lane 2's page logic and signatures kept).
+- Registered `getMyRequestIntake`, `updateIntake`, `cancelInvite` in `src/actions/deepspace.ts`. Added the stage 2 columns to `src/schemas/reccer-schemas.ts`. The RecordRoom drops undeclared fields, so the adapter test fake now does too.
+- Cron, verified in `deepspace/dist/worker.d.ts` and `worker.js` 0.44.2: `CronTask { name, schedule, timezone }`, `buildCronContext(env, ownerUserId, roomId)` with `records.query/create/update` over the same RBAC-off tools API (query accepts `recordId` in `where`; no default limit; 5,000-row scan cap) and `integrations.call` billed through `APP_OWNER_JWT`. `src/cron.ts` runs `deadline-reminders` daily at 09:00 America/New_York; `cronRuntime()` is the only Runtime with `system: true`.
+- Dev-only trigger `POST /api/dev/cron/deadline-reminders`: 404 unless `ALLOW_DEBUG_ROUTES === "true"`, caller must be a verified `@deepspace.test` account, and only `@deepspace.test` recipients are emailed.
+- The status page heading reads "Invite sent to …" while the invite is open, so lane 1's spec runs unchanged.
+- `tests/reccer.spec.ts` gained a second flow: reopen from the home page, edit the email, send, resend (the old link says a newer invite was sent), cancel (the link says cancelled; the request unlocks), resend and claim, the student's home shows "Accepted", then the reminder trigger (student and recommender both reminded through the real cron path, nothing the second time).
+- Lane 1's note about the 1.2 s autosave firing after `finishInterview` is fixed by the autosaver: finishing flushes and clears the pending save first.
+- Verified: `npm test` 64/64; `npm run typecheck` clean (core, then the whole app); `npx eslint .` clean; `npm run build` ok; `npm run validate` ok; `npx deepspace test run e2e` 13/13. Run 1 of the Reccer spec failed in the spec itself (an action called from the recommender's page before it had navigated), fixed in the spec.
+- Spend: three Reccer spec runs, about six question generations and three assemblies on owner credits (`claude-sonnet-5-5`). No real email; the dev outbox held it all. No deploy, no push, no secrets.

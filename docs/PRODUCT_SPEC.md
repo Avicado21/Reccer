@@ -1,22 +1,32 @@
 # Reccer product spec
 
 ## Roles
-- **Student:** creates a request for one recommender, lists programs and due dates, reviews the questions, sends the invite, sees status only.
+- **Student:** creates a request for one recommender, lists programs and due dates, reviews the questions, sends the invite, can reopen and edit the request until the invite goes out, can resend or cancel an unclaimed invite, sees status only.
 - **Recommender:** invited by email, signs in with their own Google or GitHub account, answers the interview, owns the answers and the draft, edits and exports.
 - **Reccer (server):** generates and validates questions, assembles the draft, runs the claim check, sends email.
+- **Scheduled job (no user):** sends deadline reminders. Runs with a system runtime that no client request can produce.
 
 ## Flow and statuses
 `draft-intake` → (generate questions) → `questions-ready` → (send invite) → `invited` → (recommender claims) → `in-progress` → (finish) → `finished`
 
+Going back:
+- **Edit the intake** (`updateIntake`, only in `draft-intake` or `questions-ready`): a change to anything the questions are built from (student name, preferred name, pronouns, relationship, fact sheet, programs) marks the question set stale and returns the request to `draft-intake`; the student creates the questions again before inviting. A change to the recommender's name or email, or a due date, keeps the questions.
+- **Cancel an unclaimed invite** (`cancelInvite`): the link stops working, the questions unlock, and the request returns to `questions-ready`.
+- **Resend** (`sendInvite` again while `invited`): a new link is emailed and the earlier unclaimed link stops working ("a newer invite was sent"). At most 5 sends per request. If the email fails, the new link is retired and the earlier one keeps working.
+
 ## Permission matrix (enforced in `actions/logic.ts`)
 | Data | Student | Recommender (after claim) | Anyone else |
 |---|---|---|---|
-| Request intake (fact sheet, programs) | create; status projection only | read via `getInterview` (names, programs, due dates; facts via memoryJog) | none |
-| Question set | create, regenerate, remove non-fixed questions until invite; frozen after | read | none |
+| Request intake (fact sheet, programs) | create; read own (`getMyRequestIntake`); edit until invite (`updateIntake`) | read via `getInterview` (names, programs, due dates; facts via memoryJog) | none |
+| Question set | create, regenerate, remove non-fixed questions until invite; frozen after (unfrozen by cancel); read own | read | none |
 | Invite token | never sees it | receives it by email | none |
+| Invite status (sent at, expires, claimed or not, claimed at, cancelled, sends left) | read (`listMyRequests`, `getMyRequestIntake`); resend, cancel while unclaimed | n/a | none |
 | Answers | **none** | read, write | none |
 | Draft, flags, edits, letters, form answers | **none** | read, write | none |
 | Status | read (`listMyRequests`) | n/a | none |
+| Deadline reminders | receives a status-only email | receives a nudge with due dates | only the scheduled job (`system: true`) can trigger them |
+
+The student-facing views never include answers, drafts, flags, letters, the token or its hash, or which account claimed the invite.
 
 ## Question layers
 1. **Fixed** (F1 identity, F2 relationship and duration, F3 why, F4 ranking, F5 strength and contact, F6 rating if any program has one, F7 anything else). Never LLM-written; cannot be removed.
@@ -29,10 +39,23 @@ Every question has `section`, `prompt`, `opener`, `programScope`, `formMappings`
 Reject a generated prompt if it contains ranking or praise words, any digit, or a capitalized name from the fact sheet (other than the student, schools, and programs), or if it is not a question. Ids are reassigned by Reccer; the model cannot scope a question to a program. If fewer than 8 survive, use the default bank.
 
 ## Assembly (LLM call 2)
-The model returns JSON paragraphs; each sentence lists its source question ids. Reccer validates the shape, sorts by section, and builds one letter per program (shared paragraphs plus that program's fit paragraph). The only text Reccer adds is one template line: "I recommend [student] for the [program] at [school]." If the call fails or is over the cap, the deterministic assembly uses the answers with filler removed.
+The model returns JSON paragraphs; each sentence lists its source question ids. Reccer validates the shape, sorts by section, gives every sentence a stable id, and builds one letter per program (shared paragraphs plus that program's fit paragraph). The only text Reccer adds is one template line: "I recommend [student] for the [program] at [school]." If the call fails or is over the cap, the deterministic assembly uses the answers with filler removed.
+
+## Sentence ids and edits
+Each assembled sentence gets an id that Reccer derives from its section, program scope, sources, and original text (`assignSentenceIds`); the model never chooses it. Identical sentences get distinct ids (`-2`, `-3`). Edits, flags, and the draft page all use the id, never the sentence's position or its text.
+
+Re-finishing the interview keeps every edit whose sentence comes out the same (same id) and drops only edits whose sentence is gone. Each dropped edit is quoted back to the recommender in the draft's notes so nothing they wrote is lost silently. In practice: with the deterministic draft, edits survive unless the answer behind the sentence changed; with the LLM draft, a re-run usually rewords sentences, so most edits are dropped and quoted.
+
+Saving empty text, or the original text, reverts a sentence ("Undo my edit").
 
 ## Claim check (code, `claimCheck.ts`)
-For each sentence, compared with the answers it cites: numbers, proper nouns, and ranking or praise words must appear there; more than 40% new content words is flagged as a heavy rewrite; unknown or missing sources are flagged; answered questions the draft never used are listed. A sentence the recommender rewrites drops its flags.
+For each sentence, compared with the answers it cites: numbers, proper nouns, and ranking or praise words must appear there; more than 40% new content words is flagged as a heavy rewrite; unknown or missing sources are flagged; answered questions the draft never used are listed.
+
+Ranking and praise words come in two kinds (`text.ts`):
+- **Always ranking:** best, exceptional, outstanding, brilliant, talented, first-rate, top-notch, and similar. Any use must come from the cited answer.
+- **Ranking only in some phrases:** first, only, most, top, higher, better, stronger. They flag only in a ranking phrase, matched by plain regular expressions: "the best", "top three", "top 5%", "a top performer", "the only intern who", "the most capable engineer", "first in their cohort", "better than any intern", "higher than their peers". Ordinary uses ("the first time", "only two weeks", "most mornings", "the top of the page", "better tests", "higher than expected") do not flag. The same function powers the leading-question check, so a neutral generated question such as "What was the first project…?" is no longer rejected.
+
+**Edited sentences** drop their original flags, and the same rules run again on the recommender's text, against the answers the original sentence cited, as **advisory notes** ("your edit adds the number "15", which is not in your original answer; keep it if it is right"). Heavy-rewrite is skipped for edits. The edit stands either way; the notes are for the recommender only.
 
 ## Exports (on the recommender's device)
 Copy as plain text (for portal text boxes), Save as PDF (print stylesheet), Download Word file (`docx` in the browser). Letters are never stored as files server-side.
@@ -40,3 +63,6 @@ Copy as plain text (for portal text boxes), Save as PDF (print stylesheet), Down
 ## Emails
 - **Invite:** student name, every program with its due date (earliest first), question count and time estimate, the confidentiality line, the sign-in link.
 - **Completion:** to the student, status only, no letter content. Sent once.
+- **Deadline reminders** (`sendDeadlineReminders`, run by the `deadline-reminders` cron task daily at 09:00 America/New_York): for each `invited` or `in-progress` request whose earliest due date that has not passed is within 7 days, then again within 2 days. Each window is sent at most once per recipient (recorded in `requests.remindersSent`); a failed send is retried on the next run.
+  - To the student: status only (not opened yet, or started and not finished), their earliest deadline, and a pointer to resend. No answers or letter content.
+  - To the recommender: a gentle nudge listing every upcoming due date, earliest first. If they are in progress, a link to resume the interview; if they have not opened the invite, a pointer to the original invite email (the cron never mints a new claim link). If that link has expired, only the student is reminded, with a prompt to resend; the recommender's reminder waits until a working link exists.

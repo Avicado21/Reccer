@@ -10,6 +10,41 @@ import type {
 import { SECTION_ORDER } from "./types";
 import { countWords, stripFiller } from "./text";
 
+/** FNV-1a, 32-bit. Small, sync, and identical in the browser, the worker, and Node. */
+function hash32(s: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, "0");
+}
+
+/**
+ * Gives every sentence a stable id from what it is, not where it sits: section, program scope,
+ * sources, and original text. The same sentence in a later assembly gets the same id; exact
+ * duplicates are told apart by an occurrence suffix (-2, -3). Any id the model sent is ignored.
+ */
+export function assignSentenceIds(paragraphs: AssembledParagraph[]): AssembledParagraph[] {
+  const seen = new Map<string, number>();
+  return paragraphs.map((p) => ({
+    ...p,
+    sentences: p.sentences.map((s) => {
+      const base = `s${hash32(`${p.section}|${p.programScope}|${s.sources.join(",")}|${s.text.trim().replace(/\s+/g, " ")}`)}`;
+      const n = (seen.get(base) ?? 0) + 1;
+      seen.set(base, n);
+      return { ...s, id: n === 1 ? base : `${base}-${n}` };
+    }),
+  }));
+}
+
+/** Every assembled sentence by id, with its position in the assembly. */
+export function sentenceIndex(assembly: Assembly): Map<string, { paragraph: number; sentence: number; value: AssembledSentence }> {
+  const m = new Map<string, { paragraph: number; sentence: number; value: AssembledSentence }>();
+  assembly.paragraphs.forEach((p, pi) => p.sentences.forEach((s, si) => m.set(s.id, { paragraph: pi, sentence: si, value: s })));
+  return m;
+}
+
 function answerText(a: Answers[string] | undefined): string | null {
   if (!a || a === "SKIPPED") return null;
   return [a.text, a.followUp].filter(Boolean).join(" ");
@@ -27,6 +62,7 @@ export function validateAssembly(raw: unknown, questions: Question[]): { ok: boo
     const sentences: AssembledSentence[] = p.sentences
       .filter((s: any) => typeof s?.text === "string" && s.text.trim())
       .map((s: any) => ({
+        id: "", // assigned below, after sorting
         text: s.text.trim(),
         sources: Array.isArray(s.sources) ? s.sources.filter((x: unknown) => typeof x === "string") : [],
       }));
@@ -40,7 +76,7 @@ export function validateAssembly(raw: unknown, questions: Question[]): { ok: boo
   paragraphs.sort((a, b) => SECTION_ORDER.indexOf(a.section) - SECTION_ORDER.indexOf(b.section));
   const ok = paragraphs.length > 0;
   if (!ok) errors.push("no usable paragraphs");
-  return { ok, assembly: ok ? { paragraphs, cuts: strs(r.cuts), checks: strs(r.checks), mode: "llm" } : null, errors };
+  return { ok, assembly: ok ? { paragraphs: assignSentenceIds(paragraphs), cuts: strs(r.cuts), checks: strs(r.checks), mode: "llm" } : null, errors };
 }
 
 /** Fallback when LLM call 2 fails or is over budget. Faithful by construction. */
@@ -52,12 +88,12 @@ export function deterministicAssembly(questions: Question[], answers: Answers): 
     if (!t) continue;
     const key = `${q.section}|${q.programScope}`;
     if (!groups.has(key)) groups.set(key, { section: q.section, programScope: q.programScope, sentences: [] });
-    groups.get(key)!.sentences.push({ text: stripFiller(t), sources: [q.id] });
+    groups.get(key)!.sentences.push({ id: "", text: stripFiller(t), sources: [q.id] });
   }
   const paragraphs = [...groups.values()].sort(
     (a, b) => SECTION_ORDER.indexOf(a.section) - SECTION_ORDER.indexOf(b.section),
   );
-  return { paragraphs, cuts: [], checks: [], mode: "deterministic" };
+  return { paragraphs: assignSentenceIds(paragraphs), cuts: [], checks: [], mode: "deterministic" };
 }
 
 /** Sections that merge into one paragraph, mirroring the original template. */
@@ -73,6 +109,7 @@ export function buildLetters(intake: StudentIntake, assembly: Assembly): Letter[
       if (group[0] === "opening") {
         // The one fixed line Reccer adds: which program the letter is for.
         const line: AssembledSentence = {
+          id: `template:${program.id}`,
           text: `I recommend ${intake.studentName} for the ${program.name} at ${program.school}.`,
           sources: ["TEMPLATE"],
         };

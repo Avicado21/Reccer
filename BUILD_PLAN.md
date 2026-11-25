@@ -31,10 +31,10 @@
 - [ ] Writeup and submit
 
 ## Nice to have, in this order (only after stage 2 is deployed and tested)
-1. `getMyRequestIntake` so students can reopen and edit a saved intake
+1. [x] `getMyRequestIntake` so students can reopen and edit a saved intake (plus `updateIntake`, invite resend, cancel, status)
 2. `deepspace/testing` multi-user Playwright spec for the student-cannot-read rule
 3. Resume upload via file storage (recommender read-only)
-4. Deadline reminder email via a scheduled job, a few days before the earliest due date
+4. [x] Deadline reminder email: logic and emails done (`sendDeadlineReminders`); the cron trigger is not wired
 5. Realtime status (only if row-level read rules are confirmed)
 
 ## Timeline for Nov 25 (ET)

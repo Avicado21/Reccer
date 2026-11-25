@@ -152,3 +152,106 @@ test('student to recommender, with permission checks', async ({ users }) => {
   const anon = await r.request.post('/api/actions/listMyRequests', { data: {} })
   expect(anon.status()).toBe(401)
 })
+
+/**
+ * Stage 2 paths: reopen and edit a saved request, resend and cancel the invite,
+ * the student's status view, and the deadline-reminder job through the real
+ * cron path (buildCronContext -> RecordRoom) via the dev-only trigger.
+ * One real question generation; no assembly.
+ */
+test('reopen and edit, resend and cancel, reminders', async ({ users }) => {
+  test.setTimeout(240_000)
+  const [student, rec] = await users(NAMES.slice(0, 2))
+  const run = `__test-${Date.now()}__`
+  const recName = `Dr. Casey Park ${run}`
+  const soon = new Date(Date.now() + 3 * 86_400_000).toISOString().slice(0, 10) // inside the 7-day window
+
+  // ---- Create with a typo in the recommender's email ----
+  const s = student.page
+  await s.goto('/student/new')
+  await s.getByLabel('Your full name').fill('Riley Chen')
+  await s.getByLabel("Recommender's name").fill(recName)
+  await s.getByLabel("Recommender's email").fill(`typo-${Date.now()}@deepspace.test`)
+  await s.getByLabel('How you know them').fill('My advisor for my senior thesis')
+  await s.getByLabel('Background they might want to look up').fill('Thesis on river sediment sensors.')
+  await s.getByLabel('School').fill('Eastlake University')
+  await s.getByLabel('Program', { exact: true }).fill('MS in Environmental Data')
+  await s.getByLabel('Letter due').fill(soon)
+  await s.getByRole('button', { name: 'Create questions' }).click()
+  await expect(s.getByRole('heading', { name: 'Review the questions' })).toBeVisible({ timeout: 120_000 })
+  await expect(s).toHaveURL(/\/student\/new\?id=/)
+  const requestId = new URL(s.url()).searchParams.get('id')!
+
+  // ---- Reopen from the home page and fix the email (contact fixes keep the questions) ----
+  await s.goto('/student')
+  await s.locator('li', { hasText: run }).getByRole('link', { name: 'Review and send' }).click()
+  await expect(s.getByRole('heading', { name: 'Review the questions' })).toBeVisible({ timeout: 30_000 })
+  await s.getByRole('button', { name: 'Edit details' }).click()
+  await expect(s.getByLabel('Your full name')).toHaveValue('Riley Chen')
+  await s.getByLabel("Recommender's email").fill(rec.email)
+  await s.getByRole('button', { name: 'Save and review questions' }).click()
+  await expect(s.getByRole('heading', { name: 'Review the questions' })).toBeVisible({ timeout: 30_000 })
+  const reopened = await call(s, 'getMyRequestIntake', { requestId })
+  expect(reopened.success).toBe(true)
+  expect(reopened.data.intake.recommenderEmail).toBe(rec.email)
+  expect(reopened.data.questionsStale).toBe(false)
+  expect(JSON.stringify(reopened.data)).not.toMatch(/tokenHash|claimedEmail|assembly/)
+  // Nobody else can read or edit it.
+  await rec.page.goto('/home')
+  expect(await call(rec.page, 'getMyRequestIntake', { requestId })).toMatchObject({ success: false, code: 'forbidden' })
+  expect(await call(rec.page, 'updateIntake', { requestId, intake: reopened.data.intake })).toMatchObject({ success: false, code: 'forbidden' })
+
+  // ---- Send, then resend: the first link is superseded ----
+  await s.getByRole('button', { name: 'Send invite' }).click()
+  await expect(s.getByRole('heading', { name: /Invite sent to/ })).toBeVisible({ timeout: 60_000 })
+  await expect(s.getByText(/not opened yet/)).toBeVisible()
+  const invites = async () => (await outbox(rec.page)).filter((m) => m.text.includes('/recommender/claim?token=') && m.text.includes('Eastlake University'))
+  const first = (await invites()).pop()!.text.match(/claim\?token=([A-Za-z0-9_-]+)/)![1]
+  await s.getByRole('button', { name: 'Resend invite' }).click()
+  await expect.poll(async () => (await invites()).length, { timeout: 30_000 }).toBeGreaterThanOrEqual(2)
+  const second = (await invites()).pop()!.text.match(/claim\?token=([A-Za-z0-9_-]+)/)![1]
+  expect(second).not.toBe(first)
+  const superseded = await call(rec.page, 'claimInvite', { token: first })
+  expect(superseded).toMatchObject({ success: false, code: 'invalid' })
+  expect(superseded.error).toMatch(/newer invite/)
+
+  // ---- Cancel: the live link stops working and the request unlocks ----
+  s.once('dialog', (d) => d.accept())
+  await s.getByRole('button', { name: 'Cancel invite' }).click()
+  await expect(s.getByRole('heading', { name: 'Review the questions' })).toBeVisible({ timeout: 30_000 })
+  const cancelled = await call(rec.page, 'claimInvite', { token: second })
+  expect(cancelled).toMatchObject({ success: false, code: 'invalid' })
+  expect(cancelled.error).toMatch(/cancelled/)
+
+  // ---- Send again; the recommender accepts; the student sees status only ----
+  await s.getByRole('button', { name: 'Send invite' }).click()
+  await expect(s.getByRole('heading', { name: /Invite sent to/ })).toBeVisible({ timeout: 60_000 })
+  const third = (await invites()).pop()!.text.match(/claim\?token=([A-Za-z0-9_-]+)/)![1]
+  expect(await call(rec.page, 'claimInvite', { token: third })).toMatchObject({ success: true, data: { requestId } })
+  await s.goto('/student')
+  await expect(s.locator('li', { hasText: run }).getByText(/^Accepted /)).toBeVisible({ timeout: 30_000 })
+  const status = (await call(s, 'listMyRequests')).data.find((x: any) => x.requestId === requestId)
+  expect(status.invite).toMatchObject({ claimed: true, sendCount: 3 })
+  expect(JSON.stringify(status)).not.toContain(rec.email)
+
+  // ---- Reminders through the real cron path (dev trigger; test inboxes only) ----
+  const trigger = async (p: Page) => p.evaluate(async () => {
+    const t = await fetch('/api/auth/token', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' } })
+    const { token } = (await t.json()) as { token?: string }
+    const r = await fetch('/api/dev/cron/deadline-reminders', { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
+    return { status: r.status, body: await r.json() }
+  })
+  const fired = await trigger(s)
+  expect(fired.status).toBe(200)
+  const mineSent = fired.body.data.sent.filter((x: any) => x.requestId === requestId).map((x: any) => x.to).sort()
+  expect(mineSent).toEqual(['recommender', 'student'])
+  const toStudent = (await outbox(s)).filter((m) => m.subject.includes('status of your request') && m.subject.includes(run)).pop()
+  expect(toStudent, 'status-only reminder for the student').toBeTruthy()
+  expect(toStudent!.text).toContain('status update only')
+  expect(toStudent!.text).not.toMatch(/token=/)
+  const toRec = (await outbox(rec.page)).filter((m) => m.subject.startsWith('Reminder:') && m.text.includes(`/recommender/interview?id=${requestId}`)).pop()
+  expect(toRec, 'nudge with a resume link for the recommender').toBeTruthy()
+  // Same window again: nothing new for this request.
+  const again = await trigger(s)
+  expect(again.body.data.sent.filter((x: any) => x.requestId === requestId)).toEqual([])
+})

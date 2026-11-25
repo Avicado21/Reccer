@@ -8,7 +8,7 @@ export default function DraftPage() {
   const requestId = new URLSearchParams(location.search).get("id") ?? "";
   const [d, setD] = useState<Draft | null>(null);
   const [tab, setTab] = useState(0);
-  const [active, setActive] = useState<{ p: number; s: number } | null>(null);
+  const [active, setActive] = useState<string | null>(null); // a sentence id
   const [editText, setEditText] = useState("");
   const [msg, setMsg] = useState("");
   const [sig, setSig] = useState({ name: "", titleLine: "", email: "" });
@@ -16,26 +16,23 @@ export default function DraftPage() {
   const load = () => api.getDraft(requestId).then((r) => (r.ok ? setD(r.data) : setMsg(r.error)));
   useEffect(() => { load(); }, [requestId]);
 
-  // Map each assembled sentence to its flags, keyed by its position in the assembly.
+  // Every assembled sentence by its stable id, and its flags (or, once edited, advisory notes).
+  const byId = useMemo(() => new Map((d?.assembly.paragraphs ?? []).flatMap((p) => p.sentences.map((s) => [s.id, s] as const))), [d]);
   const flagsAt = useMemo(() => {
     const m = new Map<string, Draft["flags"]>();
-    d?.flags.forEach((f) => { if (f.paragraph !== null) { const k = `${f.paragraph}:${f.sentence}`; m.set(k, [...(m.get(k) ?? []), f]); } });
+    [...(d?.flags ?? []), ...(d?.advisories ?? [])].forEach((f) => { if (f.sentenceId) m.set(f.sentenceId, [...(m.get(f.sentenceId) ?? []), f]); });
     return m;
   }, [d]);
 
   if (!d) return <main className="rc"><div className="rc-wrap">{msg ? <p className="error">{msg}</p> : <p className="muted">Loading your draft…</p>}</div></main>;
 
   const letter = d.letters[tab];
-  // Locate a letter sentence back in the assembly so edits and flags line up.
-  const locate = (text: string) => {
-    for (let p = 0; p < d.assembly.paragraphs.length; p++)
-      for (let s = 0; s < d.assembly.paragraphs[p].sentences.length; s++)
-        if (d.assembly.paragraphs[p].sentences[s].text === text) return { p, s };
-    return null;
-  };
-  const sentenceFlags = (pos: { p: number; s: number } | null) => (pos ? flagsAt.get(`${pos.p}:${pos.s}`) ?? [] : []);
-  const activeSentence = active ? d.assembly.paragraphs[active.p].sentences[active.s] : null;
+  // Letter sentences carry the assembly's sentence ids, so duplicates never collide.
+  const sentenceFlags = (id: string | null) => (id ? flagsAt.get(id) ?? [] : []);
+  const activeSentence = active ? byId.get(active) ?? null : null;
   const unused = d.flags.filter((f) => f.kind === "unused-answer");
+  const sentenceLevel = d.flags.filter((f) => f.sentenceId);
+  const open = (id: string, text: string) => { setActive(id); setEditText(text); };
   const form = d.forms[tab];
 
   function highlight(text: string, flags: Draft["flags"]) {
@@ -48,8 +45,13 @@ export default function DraftPage() {
 
   async function saveEdit() {
     if (!active) return;
-    const r = await api.saveEdit({ requestId, paragraph: active.p, sentence: active.s, text: editText });
-    if (r.ok) { setActive(null); setMsg("Edit saved"); load(); } else setMsg(r.error);
+    const r = await api.saveEdit({ requestId, sentenceId: active, text: editText });
+    if (r.ok) { setActive(null); setMsg(r.data.reverted ? "Back to the drafted sentence" : "Edit saved"); load(); } else setMsg(r.error);
+  }
+  async function revert() {
+    if (!active) return;
+    const r = await api.saveEdit({ requestId, sentenceId: active, text: "" });
+    if (r.ok) { setActive(null); setMsg("Back to the drafted sentence"); load(); } else setMsg(r.error);
   }
 
   const sigReady = sig.name && sig.email;
@@ -59,6 +61,7 @@ export default function DraftPage() {
     <main className="rc"><div className="rc-wrap rc-wide">
       <h1>Your draft</h1>
       <p className="muted">Every sentence comes from your answers. Click a sentence to see the answer it came from or to rewrite it. Highlighted words are ones the check could not find in your answers; keep them only if you meant them.</p>
+      {d.notes.length > 0 && <div className="memory" role="status">{d.notes.map((n, k) => <p key={k} style={{ margin: "0 0 0.5rem" }}>{n}</p>)}</div>}
 
       <div className="tabs" role="tablist">
         {d.letters.map((l, k) => <button key={l.programId} role="tab" aria-selected={k === tab} onClick={() => setTab(k)}>{l.title}</button>)}
@@ -69,13 +72,15 @@ export default function DraftPage() {
           <p>Dear Members of the Admissions Committee,</p>
           {letter.paragraphs.map((para, pi) => (
             <p key={pi}>{para.map((s, si) => {
-              const pos = s.sources.includes("TEMPLATE") ? null : locate(s.text);
-              const on = active && pos && active.p === pos.p && active.s === pos.s;
-              return <span key={si}>
-                <span className={pos ? `sentence${on ? " active" : ""}` : undefined} tabIndex={pos ? 0 : -1}
-                  onClick={() => { if (pos) { setActive(pos); setEditText(s.text); } }}
-                  onKeyDown={(e) => { if (pos && e.key === "Enter") { setActive(pos); setEditText(s.text); } }}>
-                  {highlight(s.text, sentenceFlags(pos))}
+              const id = s.sources.includes("TEMPLATE") || !byId.has(s.id) ? null : s.id;
+              const on = !!id && active === id;
+              return <span key={s.id || si}>
+                <span className={id ? `sentence${on ? " active" : ""}` : undefined} tabIndex={id ? 0 : -1}
+                  style={id && d.edits[id] !== undefined ? { textDecoration: "underline dotted", textUnderlineOffset: "0.2em" } : undefined}
+                  title={id && d.edits[id] !== undefined ? "You edited this sentence" : undefined}
+                  onClick={() => { if (id) open(id, s.text); }}
+                  onKeyDown={(e) => { if (id && e.key === "Enter") open(id, s.text); }}>
+                  {highlight(s.text, sentenceFlags(id))}
                 </span>{" "}
               </span>;
             })}</p>
@@ -95,17 +100,22 @@ export default function DraftPage() {
                   {a && a !== "SKIPPED" ? a.text : "No answer"}
                 </div>;
               })}
-              {sentenceFlags(active).map((f, k) => <div key={k} className="note">{f.message}</div>)}
+              {sentenceFlags(active).map((f, k) => <div key={k} className="note" style={f.advisory ? { borderLeftStyle: "dashed" } : undefined}>{f.advisory ? `Note on your edit: ${f.message}.` : f.message}</div>)}
               <label htmlFor="edit">Rewrite in your words</label>
               <textarea id="edit" rows={4} value={editText} onChange={(e) => setEditText(e.target.value)} />
-              <div className="actions"><button className="primary" onClick={saveEdit}>Save edit</button><button className="quiet" onClick={() => setActive(null)}>Close</button></div>
+              <div className="actions">
+                <button className="primary" onClick={saveEdit}>Save edit</button>
+                {active && d.edits[active] !== undefined && <button onClick={revert}>Undo my edit</button>}
+                <button className="quiet" onClick={() => setActive(null)}>Close</button>
+              </div>
             </>
           ) : (
             <>
               <h2 style={{ marginTop: 0 }}>Check</h2>
-              {d.flags.filter((f) => f.paragraph !== null).length === 0
+              {sentenceLevel.length === 0
                 ? <p className="muted">Nothing in this draft is missing from your answers.</p>
-                : d.flags.filter((f) => f.paragraph !== null).map((f, k) => <div key={k} className="note">{f.message}</div>)}
+                : sentenceLevel.map((f, k) => <div key={k} className="note">{f.message}</div>)}
+              {d.advisories.length > 0 && <p className="muted">{d.advisories.length === 1 ? "One note" : `${d.advisories.length} notes`} on your own edits. Your edits stand; click an edited sentence to see them.</p>}
               {unused.length > 0 && <p className="muted">{unused.length} of your answers did not make it into the draft. Click any sentence to compare.</p>}
             </>
           )}

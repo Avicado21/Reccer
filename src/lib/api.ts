@@ -5,7 +5,7 @@
 // Pages only use `api.*`, so this is the one client file that knows the transport.
 
 import { getAuthToken } from "deepspace";
-import type { Flag, Question, Assembly, Answers, Letter } from "../core/types";
+import type { Flag, Question, Assembly, Answers, Letter, StudentIntake } from "../core/types";
 
 export type Result<T> = { ok: true; data: T } | { ok: false; code: string; error: string };
 
@@ -33,10 +33,21 @@ async function invoke<T>(name: string, input: unknown = {}): Promise<Result<T>> 
   return { ok: false, code: body.code ?? String(res.status), error: body.error ?? "Something went wrong. Try again." };
 }
 
-export interface RequestSummary { requestId: string; recommenderName: string; status: string; programs: { name: string; school: string; dueDate: string }[] }
+/** Student-facing invite status. Never the token or the claiming account. */
+export interface InviteStatus {
+  sentAt: string | null; expiresAt: string; claimed: boolean; claimedAt: string | null;
+  cancelled: boolean; expired: boolean; sendCount: number; sendsLeft: number;
+}
+export interface RequestSummary { requestId: string; recommenderName: string; status: string; programs: { name: string; school: string; dueDate: string }[]; invite: InviteStatus | null }
+/** The student's own saved request: intake and questions only, never answers or letters. */
+export interface MyRequest {
+  requestId: string; status: string; intake: StudentIntake; questions: Question[]; questionSource: string | null;
+  questionsFrozen: boolean; questionsStale: boolean; editable: boolean; invite: InviteStatus | null;
+}
 export interface Interview { studentName: string; programs: RequestSummary["programs"]; questions: Question[]; answers: Answers; finished: boolean }
 export interface Draft {
-  assembly: Assembly; flags: Flag[]; edits: Record<string, string>; answers: Answers; questions: Question[];
+  /** flags: unedited sentences. advisories: the same check on the recommender's edits, as notes. */
+  assembly: Assembly; flags: Flag[]; advisories: Flag[]; edits: Record<string, string>; notes: string[]; answers: Answers; questions: Question[];
   letters: Letter[]; forms: { programId: string; title: string; answers: { label: string; answer: string }[] }[];
 }
 
@@ -44,12 +55,15 @@ export const api = {
   createRequest: (intake: unknown) => invoke<{ requestId: string }>("createRequest", intake),
   generateQuestions: (requestId: string) => invoke<{ questions: Question[]; source: string; notes: string[] }>("generateQuestions", { requestId }),
   removeQuestion: (requestId: string, questionId: string) => invoke<{ questions: Question[] }>("removeQuestion", { requestId, questionId }),
-  sendInvite: (requestId: string) => invoke<{ sentTo: string }>("sendInvite", { requestId }),
+  sendInvite: (requestId: string) => invoke<{ sentTo: string }>("sendInvite", { requestId }), // also resends
+  cancelInvite: (requestId: string) => invoke<{ cancelled: true }>("cancelInvite", { requestId }),
   listMyRequests: () => invoke<RequestSummary[]>("listMyRequests"),
+  getMyRequestIntake: (requestId: string) => invoke<MyRequest>("getMyRequestIntake", { requestId }),
+  updateIntake: (requestId: string, intake: unknown) => invoke<{ saved: true; questionsStale: boolean; notes: string[] }>("updateIntake", { requestId, intake }),
   claimInvite: (token: string) => invoke<{ requestId: string }>("claimInvite", { token }),
   getInterview: (requestId: string) => invoke<Interview>("getInterview", { requestId }),
   saveAnswer: (input: { requestId: string; questionId: string; text?: string; followUp?: string; skipped?: boolean }) => invoke<{ saved: true }>("saveAnswer", input),
-  finishInterview: (requestId: string) => invoke<{ mode: string; flagCount: number; notes: string[] }>("finishInterview", { requestId }),
+  finishInterview: (requestId: string) => invoke<{ mode: string; flagCount: number; keptEdits: number; notes: string[] }>("finishInterview", { requestId }),
   getDraft: (requestId: string) => invoke<Draft>("getDraft", { requestId }),
-  saveEdit: (input: { requestId: string; paragraph: number; sentence: number; text: string }) => invoke<{ saved: true }>("saveEdit", input),
+  saveEdit: (input: { requestId: string; sentenceId: string; text: string }) => invoke<{ saved: true; reverted: boolean }>("saveEdit", input),
 };

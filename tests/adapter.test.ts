@@ -6,8 +6,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { ActionContext, ActionResult, ActionTools } from "deepspace/worker";
 import {
-  reccerActions, unwrap, anthropicBody, completionText, emailFromVerifiedJwt, type AdapterEnv,
+  reccerActions, unwrap, anthropicBody, completionText, emailFromVerifiedJwt, cronRuntime, testRecipientsOnly, type AdapterEnv,
 } from "../src/actions/deepspace";
+import * as L from "../src/actions/logic";
+import { tasks as cronTasks, DEADLINE_REMINDERS_TASK } from "../src/cron";
 import { BOOLEAN_COLUMNS, reccerSchemas } from "../src/schemas/reccer-schemas";
 import { schemas } from "../src/schemas";
 import { rememberClaimToken, pendingClaimUrl, clearPendingClaim, CLAIM_PATH } from "../src/lib/claimReturn";
@@ -22,10 +24,12 @@ function fakeWorld(opts: { llm?: (body: any) => ActionResult<unknown> } = {}) {
   const llmBodies: any[] = [];
   let seq = 0;
   const table = (c: string) => tables.get(c) ?? tables.set(c, new Map()).get(c)!;
+  const columns = Object.fromEntries(reccerSchemas.map((s) => [s.name, new Set(s.columns.map((c) => c.name))]));
   const store = (c: string, data: Record<string, unknown>) => {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(structuredClone(data))) {
       if (v === null || v === undefined) continue;
+      if (columns[c] && !columns[c].has(k)) continue; // undeclared fields are silently dropped, as in the RecordRoom
       out[k] = (BOOLEAN_COLUMNS[c] ?? []).includes(k) ? (v ? 1 : 0) : v;
     }
     return out;
@@ -77,7 +81,28 @@ function fakeWorld(opts: { llm?: (body: any) => ActionResult<unknown> } = {}) {
     const ctx = { userId: user?.id ?? "anon-123", params, tools: toolsFor(user?.id ?? "anon-123"), env, callerJwt: user ? jwt(user.email) : "" } as ActionContext<AdapterEnv>;
     return (await reccerActions[name](ctx)) as any;
   }
-  return { tables, mail, llmBodies, call, table };
+  /** The SDK's CronContext over the same tables (records via the RBAC-off tools API; email billed to the owner). */
+  const cron = {
+    ownerUserId: "owner",
+    records: {
+      async query(c: string, o?: { where?: Record<string, unknown>; limit?: number }) {
+        const rows = [...table(c).values()].filter((r) => Object.entries(o?.where ?? {}).every(([k, v]) => (k === "recordId" ? r.recordId === v : r.data[k] === v)));
+        return structuredClone(o?.limit ? rows.slice(0, o.limit) : rows);
+      },
+      async create(c: string, data: Record<string, unknown>) { return (await toolsFor("owner").create(c, data) as any).data; },
+      async update(c: string, id: string, data: Record<string, unknown>) { return (await toolsFor("owner").update(c, id, data) as any).data; },
+      async delete() { throw new Error("unused"); },
+    },
+    integrations: {
+      async call(endpoint: string, body?: any) {
+        if (endpoint !== "email/send") throw new Error(`unexpected ${endpoint}`);
+        if (String(body?.to).includes("bounce")) throw new Error("Integration call email/send failed: bounced");
+        mail.push(body);
+        return { id: "m" };
+      },
+    },
+  };
+  return { tables, mail, llmBodies, call, table, cron };
 }
 
 const STUDENT = { id: "u-student", email: "student@example.test" };
@@ -223,4 +248,135 @@ test("dev outbox: only under ALLOW_DEBUG_ROUTES=true, only @deepspace.test, only
   assert.equal(captureDevMail({ ALLOW_DEBUG_ROUTES: "true" }, msg), true);
   assert.equal(devMailFor("rec-1@deepspace.test").length, 1);
   assert.equal(devMailFor("student@deepspace.test").length, 0);
+});
+
+// ---------- stage 2: new actions, new columns, the scheduled job ----------
+
+const tokenIn = (text: string) => text.match(/claim\?token=([A-Za-z0-9_-]+)/)![1];
+
+test("stage 2 columns exist, so the RecordRoom keeps what logic.ts writes", () => {
+  const cols = (n: string) => reccerSchemas.find((s) => s.name === n)!.columns.map((c) => c.name);
+  for (const c of ["remindersSent"]) assert.ok(cols("requests").includes(c), `requests.${c}`);
+  for (const c of ["stale", "frozen"]) assert.ok(cols("questionSets").includes(c), `questionSets.${c}`);
+  for (const c of ["sentAt", "cancelledAt", "replacedAt", "claimedEmail"]) assert.ok(cols("invites").includes(c), `invites.${c}`);
+  for (const c of ["edits", "notes"]) assert.ok(cols("drafts").includes(c), `drafts.${c}`);
+  assert.deepEqual(BOOLEAN_COLUMNS.questionSets.sort(), ["frozen", "stale"]);
+});
+
+test("new actions are registered; the reminder job is not a client action", () => {
+  for (const n of ["getMyRequestIntake", "updateIntake", "cancelInvite", "sendInvite"]) assert.equal(typeof reccerActions[n], "function", n);
+  assert.equal(reccerActions.sendDeadlineReminders, undefined);
+  assert.equal(Object.keys(reccerActions).some((n) => /remind|cron/i.test(n)), false);
+});
+
+test("reopen and edit, cancel and resend, through the adapter with undeclared fields dropped", async () => {
+  const w = fakeWorld();
+  const { data: { requestId } } = await w.call("createRequest", STUDENT, intake());
+  await w.call("generateQuestions", STUDENT, { requestId });
+
+  const mine = await w.call("getMyRequestIntake", STUDENT, { requestId });
+  assert.equal(mine.success, true, JSON.stringify(mine));
+  assert.equal(mine.data.editable, true);
+  assert.equal((await w.call("getMyRequestIntake", OTHER, { requestId })).code, "forbidden");
+
+  // A question-affecting edit: the stale flag must survive the 0/1 round trip.
+  const up = await w.call("updateIntake", STUDENT, { requestId, intake: { ...mine.data.intake, preferredName: "Jo" } });
+  assert.equal(up.data.questionsStale, true);
+  assert.equal([...w.table("questionSets").values()][0].data.stale, 1);
+  assert.equal((await w.call("getMyRequestIntake", STUDENT, { requestId })).data.questionsStale, true);
+  assert.equal((await w.call("sendInvite", STUDENT, { requestId })).code, "conflict");
+  await w.call("generateQuestions", STUDENT, { requestId });
+
+  // Send, resend: the first link is superseded (replacedAt must persist), the second works.
+  assert.equal((await w.call("sendInvite", STUDENT, { requestId })).success, true);
+  const first = tokenIn(w.mail.at(-1).text);
+  assert.equal((await w.call("sendInvite", STUDENT, { requestId })).success, true);
+  const second = tokenIn(w.mail.at(-1).text);
+  const status = (await w.call("listMyRequests", STUDENT)).data[0].invite;
+  assert.equal(status.sendCount, 2);
+  assert.match(status.sentAt, /^\d{4}-\d\d-\d\dT/);
+  assert.equal(status.claimed, false);
+  const stale = await w.call("claimInvite", REC, { token: first });
+  assert.equal(stale.code, "invalid");
+  assert.match(stale.error, /newer invite/);
+
+  // Cancel: the live link stops working (cancelledAt must persist) and the request unlocks.
+  assert.equal((await w.call("cancelInvite", OTHER, { requestId })).code, "forbidden");
+  assert.equal((await w.call("cancelInvite", STUDENT, { requestId })).success, true);
+  assert.match((await w.call("claimInvite", REC, { token: second })).error, /cancelled/);
+  const unlocked = await w.call("getMyRequestIntake", STUDENT, { requestId });
+  assert.equal(unlocked.data.editable, true);
+  assert.equal(unlocked.data.questionsFrozen, false);
+  assert.equal((await w.call("updateIntake", STUDENT, { requestId, intake: { ...unlocked.data.intake, recommenderName: "Dr. Nair" } })).success, true);
+
+  await w.call("sendInvite", STUDENT, { requestId });
+  assert.equal((await w.call("claimInvite", REC, { token: tokenIn(w.mail.at(-1).text) })).success, true);
+  const claimed = (await w.call("listMyRequests", STUDENT)).data[0];
+  assert.equal(claimed.invite.claimed, true);
+  assert.doesNotMatch(JSON.stringify(claimed), /rec@example|u-rec|tokenHash/);
+  assert.equal((await w.call("updateIntake", STUDENT, { requestId, intake: unlocked.data.intake })).code, "conflict");
+});
+
+test("edits by sentence id and finish notes persist through the adapter", async () => {
+  const w = fakeWorld();
+  const { data: { requestId } } = await w.call("createRequest", STUDENT, intake());
+  await w.call("generateQuestions", STUDENT, { requestId });
+  await w.call("sendInvite", STUDENT, { requestId });
+  await w.call("claimInvite", REC, { token: tokenIn(w.mail.at(-1).text) });
+  await w.call("saveAnswer", REC, { requestId, questionId: "F1", text: "I am Priya Nair, a principal engineer." });
+  await w.call("saveAnswer", REC, { requestId, questionId: "F3", text: "I recommend Jordan because they check their work." });
+  await w.call("finishInterview", REC, { requestId });
+  let d = (await w.call("getDraft", REC, { requestId })).data;
+  assert.ok(d.notes.length >= 1, "the fallback note was stored (drafts.notes)");
+  const f1 = d.assembly.paragraphs[0].sentences.find((s: any) => s.sources.includes("F1"));
+  assert.equal((await w.call("saveEdit", REC, { requestId, sentenceId: f1.id, text: "I am Dr. Priya Nair, principal engineer." })).success, true);
+  assert.equal((await w.call("finishInterview", REC, { requestId })).data.keptEdits, 1);
+  d = (await w.call("getDraft", REC, { requestId })).data;
+  assert.equal(d.edits[f1.id], "I am Dr. Priya Nair, principal engineer.");
+  assert.equal((await w.call("saveEdit", STUDENT, { requestId, sentenceId: f1.id, text: "x" })).code, "forbidden");
+});
+
+test("scheduled job: daily task, cron Runtime over the RecordRoom, reminders marked once", async () => {
+  assert.deepEqual(cronTasks, [{ name: DEADLINE_REMINDERS_TASK, schedule: "0 9 * * *", timezone: "America/New_York" }]);
+  const w = fakeWorld();
+  const soon = new Date(Date.now() + 3 * 86_400_000).toISOString().slice(0, 10);
+  const i = { ...intake(), programs: intake().programs.map((p: any) => ({ ...p, dueDate: soon })) };
+  const { data: { requestId } } = await w.call("createRequest", STUDENT, i);
+  await w.call("generateQuestions", STUDENT, { requestId });
+  await w.call("sendInvite", STUDENT, { requestId });
+  const before = w.mail.length;
+
+  const rt = cronRuntime(w.cron as any, { APP_NAME: "reccer" });
+  assert.equal(rt.system, true);
+  assert.equal(rt.userId, null);
+  assert.equal((await rt.db.get("requests", requestId))?.id, requestId, "get by recordId");
+  const res = await L.sendDeadlineReminders(rt);
+  assert.equal(res.checked, 1);
+  assert.deepEqual(res.sent.map((x) => x.to).sort(), ["recommender", "student"]);
+  assert.deepEqual(w.mail.slice(before).map((m) => m.to).sort(), [REC.email, STUDENT.email].sort());
+  assert.equal((w.table("requests").get(requestId)!.data.remindersSent as string[]).length, 2, "requests.remindersSent persisted");
+  assert.equal((await L.sendDeadlineReminders(rt)).sent.length, 0, "not sent twice in one window");
+
+  // A client-built runtime can never run it.
+  const clientRt = { ...rt, system: undefined };
+  await assert.rejects(L.sendDeadlineReminders(clientRt), { code: "forbidden" });
+});
+
+test("scheduled job: a failed send is reported, not marked; the dev filter skips real inboxes", async () => {
+  const w = fakeWorld();
+  const soon = new Date(Date.now() + 1 * 86_400_000).toISOString().slice(0, 10);
+  const i = { ...intake(), recommenderEmail: "bounce@example.test", programs: intake().programs.map((p: any) => ({ ...p, dueDate: soon })) };
+  const { data: { requestId } } = await w.call("createRequest", STUDENT, i);
+  await w.call("generateQuestions", STUDENT, { requestId });
+  await w.call("sendInvite", STUDENT, { requestId }, { APP_NAME: "reccer" });
+  const rt = cronRuntime(w.cron as any, { APP_NAME: "reccer" });
+
+  const dev = await L.sendDeadlineReminders(testRecipientsOnly(rt));
+  assert.equal(dev.sent.length, 0, "no @deepspace.test recipients here");
+  assert.ok(dev.failed.every((f) => /not a test address/.test(f.error)));
+  assert.equal(w.table("requests").get(requestId)!.data.remindersSent, undefined, "skipped sends are not marked");
+
+  const real = await L.sendDeadlineReminders(rt);
+  assert.deepEqual(real.sent.map((x) => x.to), ["student"]);
+  assert.match(real.failed[0].error, /bounced/);
 });

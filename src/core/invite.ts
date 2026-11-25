@@ -17,6 +17,26 @@ export async function hashToken(token: string): Promise<string> {
 export const fmtDate = (iso: string) =>
   new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
 
+/** "November 25, 3:10 PM". Uses the viewer's time zone unless one is given. */
+export const fmtDateTime = (iso: string, timeZone?: string) => {
+  const d = new Date(iso);
+  // Joined by hand: engines disagree on the combined format ("November 25 at 3:10 PM").
+  return `${d.toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone })}, ${d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone })}`;
+};
+
+/** One status line about an invite, for the student. Status only: never who claimed it. */
+export function describeInvite(
+  i: { sentAt: string | null; claimed: boolean; claimedAt: string | null; cancelled: boolean; expired: boolean } | null,
+  timeZone?: string,
+): string {
+  if (!i) return "No invite sent yet";
+  const when = (iso: string | null) => (iso ? ` ${fmtDateTime(iso, timeZone)}` : "");
+  if (i.claimed) return `Accepted${when(i.claimedAt)}`;
+  if (i.cancelled) return "Invite cancelled";
+  if (i.expired) return `Invite sent${when(i.sentAt)}; the link has expired`;
+  return `Invite sent${when(i.sentAt)}; not opened yet`;
+}
+
 export function sortedByDue(programs: Program[]): Program[] {
   return [...programs].sort((a, b) => a.dueDate.localeCompare(b.dueDate));
 }

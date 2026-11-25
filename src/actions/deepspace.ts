@@ -16,8 +16,8 @@
 // - tools.integration returns { success, data } where data is the provider's
 //   body directly (Anthropic Messages API shape for anthropic/chat-completion).
 
-import type { ActionContext, ActionHandler, ActionResult, ActionTools } from 'deepspace/worker'
-import { isAnonymousUserId } from 'deepspace/worker'
+import type { ActionContext, ActionHandler, ActionResult, ActionTools, CronContext } from 'deepspace/worker'
+import { buildCronContext, isAnonymousUserId, isTestAccountEmail } from 'deepspace/worker'
 import * as L from './logic'
 import type { Runtime, Coll, Row } from './logic'
 import type { ChatMessage } from '../core/index'
@@ -172,12 +172,95 @@ export const reccerActions: Record<string, ActionHandler<AdapterEnv>> = {
   createRequest: action(L.createRequest),
   generateQuestions: action(L.generateQuestions),
   removeQuestion: action(L.removeQuestion),
-  sendInvite: action(L.sendInvite),
+  sendInvite: action(L.sendInvite), // also the resend path
+  cancelInvite: action(L.cancelInvite),
   listMyRequests: action((rt) => L.listMyRequests(rt)),
+  getMyRequestIntake: action(L.getMyRequestIntake),
+  updateIntake: action(L.updateIntake),
   claimInvite: action(L.claimInvite),
   getInterview: action(L.getInterview),
   saveAnswer: action(L.saveAnswer),
   finishInterview: action(L.finishInterview),
   getDraft: action(L.getDraft),
   saveEdit: action(L.saveEdit),
+}
+
+// ---------- scheduled job (src/cron.ts) ----------
+// sendDeadlineReminders is deliberately NOT in reccerActions: it reads every
+// request, so only the scheduler may run it. The cron Runtime below is the only
+// place `system: true` is ever set.
+
+/** The env fields the scheduled job needs, beyond what buildCronContext reads. */
+export interface CronAdapterEnv extends AdapterEnv {
+  DEEPSPACE_APP_ID: string
+  OWNER_USER_ID: string
+}
+
+/**
+ * Runtime for the scheduled job, over the SDK's CronContext. Records go to the
+ * same RecordRoom the actions use (`app:<DEEPSPACE_APP_ID>`, as in
+ * src/server/action-routes.ts) through the same RBAC-off tools API, so rows
+ * unwrap exactly as they do for actions. Email is billed to the owner via
+ * APP_OWNER_JWT. There is no caller, no LLM, and no single-record get.
+ */
+export function cronRuntime(cron: CronContext, env: AdapterEnv): Runtime {
+  const records = (rows: unknown[], c: Coll) => rows.map((rec) => unwrap(c, rec as Envelope))
+  return {
+    userId: null,
+    userEmail: null,
+    system: true,
+    now: () => new Date(),
+    appUrl: (env.APP_URL || `https://${env.APP_NAME || 'reccer'}.app.space`).replace(/\/+$/, ''),
+    db: {
+      async get(c: Coll, id: string) {
+        // CronContext has no get; look the row up by id instead.
+        if (!id || typeof id !== 'string') return null
+        return records(await cron.records.query(c, { where: { recordId: id }, limit: 1 }), c)[0] ?? null
+      },
+      async find(c: Coll, where: Record<string, unknown>) {
+        return records(await cron.records.query(c, { where }), c)
+      },
+      async create(c: Coll, data: Record<string, unknown>) {
+        const r = (await cron.records.create(c, data)) as { recordId?: string } | null
+        if (!r?.recordId) throw new Error(`create ${c} returned no recordId`)
+        return r.recordId
+      },
+      async put(c: Coll, id: string, patch: Record<string, unknown>) {
+        await cron.records.update(c, id, patch)
+      },
+    },
+    async llm() {
+      return { ok: false, error: 'the model is not used by scheduled jobs' }
+    },
+    async email({ to, subject, text }) {
+      if (captureDevMail(env, { to, subject, text })) return { ok: true }
+      try {
+        await cron.integrations.call('email/send', { from: EMAIL_FROM, to, subject, text })
+        return { ok: true }
+      } catch (e) {
+        return { ok: false, error: e instanceof Error ? e.message : String(e) }
+      }
+    },
+  }
+}
+
+/** The same Runtime, but mail to anyone outside @deepspace.test is skipped (reported as failed, so never marked sent). */
+export function testRecipientsOnly(rt: Runtime): Runtime {
+  return { ...rt, email: async (m) => (isTestAccountEmail(m.to) ? rt.email(m) : { ok: false, error: 'skipped: not a test address (dev trigger)' }) }
+}
+
+/**
+ * Entry point for the daily reminder task. Returns a content-free summary, safe to log.
+ * `testRecipientsOnly` (the dev trigger in src/server/dev-outbox-route.ts) skips any
+ * recipient outside @deepspace.test, unmarked, so a manual dev run never reaches a real inbox.
+ */
+export async function runDeadlineReminders(
+  env: CronAdapterEnv & Parameters<typeof buildCronContext>[0],
+  opts: { testRecipientsOnly?: boolean } = {},
+) {
+  const cron = buildCronContext(env, env.OWNER_USER_ID, `app:${env.DEEPSPACE_APP_ID}`)
+  const base = cronRuntime(cron, env)
+  const res = await L.sendDeadlineReminders(opts.testRecipientsOnly ? testRecipientsOnly(base) : base)
+  console.log('[reccer] deadline reminders', JSON.stringify({ checked: res.checked, sent: res.sent.length, failed: res.failed.length }))
+  return res
 }

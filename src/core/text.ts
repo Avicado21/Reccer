@@ -1,13 +1,55 @@
 // Small, dependency-free text helpers used by the validators and the claim check.
 
-/** Words that rank or intensify. If one appears in a letter, the recommender must have said it. */
+/**
+ * Words that rank or praise in every use. If one appears in a letter, the recommender must have said it.
+ * Words that rank only in some uses (first, only, most, top, higher, better, ...) are in
+ * CONTEXTUAL_COMPARISONS below and flag only in a ranking phrase.
+ */
 export const COMPARISON_WORDS = [
-  "best", "top", "most", "finest", "greatest", "strongest", "brightest", "smartest",
+  "best", "finest", "greatest", "strongest", "brightest", "smartest",
   "exceptional", "outstanding", "extraordinary", "remarkable", "unparalleled", "unmatched",
   "brilliant", "impressive", "superb", "stellar", "elite", "rare", "unique", "unprecedented",
   "incredible", "amazing", "exemplary", "excellent", "phenomenal", "gifted", "talented",
-  "better", "stronger", "higher", "first", "only",
+  "first-rate", "first-class", "world-class", "top-notch", "top-tier",
 ];
+
+/** People and cohorts a ranking compares the student against. */
+const PEERS =
+  "students?|interns?|engineers?|employees?|hires?|candidates?|applicants?|people|persons?|performers?|" +
+  "members?|analysts?|researchers?|scientists?|developers?|colleagues?|peers|classmates?|mentees?|" +
+  "trainees?|scholars?|staff|class|cohort|group|team|department|section|program|year|batch";
+const NUMBERISH = "\\d+%?|one|two|three|four|five|six|seven|eight|nine|ten|twenty|few|handful|percent|tier";
+const THAN_WHOM = `(?:any|anyone|anybody|all|every|everyone|most|others|the rest|${PEERS})`;
+const GAP = "(?:[a-z'’\\-]+\\s+){0,2}"; // up to two words in between: "the only other intern"
+
+/**
+ * Words that rank only in some phrases. Each pattern matches the ranking use, so
+ * "the first time", "only two weeks", "most mornings", "top of the page", "higher-priority"
+ * and "better tests" do not flag, while "first in her class", "the only intern", "the most
+ * capable engineer", "top three", and "better than any intern" do. Plain regexes, no model.
+ */
+export const CONTEXTUAL_COMPARISONS: Record<string, RegExp[]> = {
+  first: [
+    /\b(?:ranked|ranks|ranking|placed|places|finished|came|graduated|stood)\s+first\b(?!\s+(?:time|day|week|month|year|project|job|task)\b)/,
+    new RegExp(`\\bfirst\\s+(?:in|among|of|out of)\\s+(?:the\\s+|my\\s+|her\\s+|his\\s+|their\\s+|our\\s+|all\\s+)?${GAP}(?:${PEERS})\\b`),
+  ],
+  only: [
+    new RegExp(`\\b(?:the|my|our)\\s+only\\s+${GAP}(?:${PEERS}|person|one)\\b`),
+    new RegExp(`\\bonly\\s+(?:${PEERS}|person|one)\\s+(?:who|that|to|i|in|on|ever)\\b`),
+  ],
+  most: [
+    new RegExp(`\\bmost\\s+[a-z'’\\-]+\\s+${GAP}(?:${PEERS}|person)\\b`),
+    /\bmost\s+[a-z'’\-]+\s+(?:[a-z'’\-]+\s+){0,3}(?:i(?:'ve| have)?\s+ever|ever)\b/,
+  ],
+  top: [
+    new RegExp(`\\btop\\s+(?:${NUMBERISH})\\b`),
+    new RegExp(`\\btop\\s+(?:${PEERS}|person|performer|talent)\\b`),
+    new RegExp(`\\b(?:at|near)\\s+the\\s+top\\s+of\\s+(?:the\\s+|my\\s+|her\\s+|his\\s+|their\\s+|our\\s+|all\\s+)?${GAP}(?:${PEERS}|list|rankings?)\\b`),
+  ],
+  higher: [new RegExp(`\\b(?:higher|ranked higher|rated higher)\\s+than\\s+${GAP}${THAN_WHOM}\\b`)],
+  better: [new RegExp(`\\bbetter\\s+than\\s+${GAP}${THAN_WHOM}\\b`)],
+  stronger: [new RegExp(`\\bstronger\\s+than\\s+${GAP}${THAN_WHOM}\\b`)],
+};
 
 export const STOPWORDS = new Set(
   ("a an and are as at be been but by for from had has have he her his i if in into is it its " +
@@ -70,9 +112,14 @@ export function properNouns(s: string): string[] {
   return out;
 }
 
+/** Ranking or praise words used in a ranking sense, in a stable order. */
 export function comparisonWords(s: string): string[] {
   const w = new Set(words(s));
-  return COMPARISON_WORDS.filter((c) => w.has(c));
+  const lower = s.toLowerCase().replace(/\s+/g, " ");
+  return [
+    ...COMPARISON_WORDS.filter((c) => w.has(c)),
+    ...Object.keys(CONTEXTUAL_COMPARISONS).filter((c) => CONTEXTUAL_COMPARISONS[c].some((re) => re.test(lower))),
+  ];
 }
 
 export function contentWords(s: string): string[] {

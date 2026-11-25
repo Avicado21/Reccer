@@ -21,6 +21,23 @@ Use three accounts: **S** (student), **R** (recommender), **X** (outsider). Use 
 14. With name and email filled in: Copy text, Save as PDF, and Download Word file all work. Open the .docx in Word or Google Docs.
 15. S's inbox: the completion email has no letter content. S's home page shows "Your recommender has a draft."
 
+## Stage 2 features
+26. Before inviting, S opens the request from the home page ("Review and send"): the saved details and questions load. S fixes the recommender's email and saves: the questions stay. S changes their preferred name and saves: a notice says the questions must be created again, and Send invite is refused until they are.
+27. After inviting, S's home page shows "Invite sent <date, time>; not opened yet". S opens it: Resend and Cancel are offered, with the number of sends left.
+28. S resends. The first email's link now says a newer invite was sent; the second link works.
+29. S cancels an invite. The link says the invite was cancelled; S can edit details again and send a new one.
+30. After R claims: S's home page shows "Accepted <date, time>", with no name or email of the account that claimed it, and Resend and Cancel are gone.
+31. R edits a sentence to add a ranking word or a number that was not in the answer: the edit stands, and a note on that sentence says what was added.
+32. R goes back to the interview, changes one answer, and rebuilds the draft: edits on other sentences are still there; an edit on the changed sentence is quoted in a note at the top of the draft.
+33. Two identical sentences in a draft: editing the second changes only the second.
+34. R types an answer and moves to another question within a second: the text is saved to the question it was typed on (check by going Back).
+35. Deadline reminders: with a request whose earliest due date is within 7 days, let the daily task run (09:00 America/New_York) or, locally, `POST /api/dev/cron/deadline-reminders` as a test account. S gets a status-only email; R gets a nudge listing the due dates (with a resume link if in progress). Triggering again the same day sends nothing.
+
+## Must fail (stage 2)
+36. X calls `getMyRequestIntake`, `updateIntake`, or `cancelInvite` for S's request: refused.
+37. S calls the reminder entry point from the client: refused (it runs only from the scheduled job).
+38. S resends a 6th time: refused with a plain message.
+
 ## Must fail
 16. S opens R's invite link while signed in as S: refused.
 17. S opens `/recommender/interview?id=<id>` and `/recommender/draft?id=<id>`: refused.

@@ -2,7 +2,7 @@
 // Route: /student, under (app)/(protected), whose _layout wraps AuthGate (sign-in required).
 import { useEffect, useState } from "react";
 import { api, type RequestSummary } from "../../../../lib/api";
-import { fmtDate } from "../../../../core/invite";
+import { describeInvite, fmtDate } from "../../../../core/invite";
 import "../../../../styles/reccer.css";
 
 const STATUS: Record<string, string> = {
@@ -11,6 +11,11 @@ const STATUS: Record<string, string> = {
   invited: "Invite sent",
   "in-progress": "Your recommender is answering",
   finished: "Your recommender has a draft",
+};
+const ACTION: Record<string, string> = {
+  "draft-intake": "Continue",
+  "questions-ready": "Review and send",
+  invited: "Manage invite",
 };
 
 export default function StudentHome() {
@@ -33,11 +38,13 @@ export default function StudentHome() {
             <li key={r.requestId}>
               <div>
                 <strong>{r.recommenderName}</strong>
-                <div className="muted">{r.programs.map((p) => `${p.name}, due ${fmtDate(p.dueDate)}`).join("; ")}</div>
+                <div className="muted">{[...r.programs].sort((a, b) => a.dueDate.localeCompare(b.dueDate)).map((p) => `${p.name}, due ${fmtDate(p.dueDate)}`).join("; ")}</div>
+                {r.invite && <div className="hint">{describeInvite(r.invite)}</div>}
               </div>
-              <div>{r.status === "draft-intake" || r.status === "questions-ready"
-                ? <a href={`/student/new?id=${r.requestId}`}>{STATUS[r.status]}</a>
-                : STATUS[r.status] ?? r.status}</div>
+              <div style={{ textAlign: "right" }}>
+                <div>{r.status === "invited" && r.invite?.expired ? "Invite expired" : STATUS[r.status] ?? r.status}</div>
+                <a href={`/student/new?id=${r.requestId}`}>{ACTION[r.status] ?? "Details"}</a>
+              </div>
             </li>
           ))}
         </ul>

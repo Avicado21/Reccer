@@ -50,6 +50,7 @@ export const requestsSchema: CollectionSchema = {
     text('status'), // draft-intake | questions-ready | invited | in-progress | finished
     num('generationCount'), // cap on LLM call 1
     when('createdAt'),
+    json('remindersSent'), // string[] of reminder keys already sent (core/reminders.ts reminderKey)
   ],
   permissions: CLIENT_NONE,
 }
@@ -57,7 +58,13 @@ export const requestsSchema: CollectionSchema = {
 /** The question set for a request. Student previews it before inviting; then it is frozen. */
 export const questionSetsSchema: CollectionSchema = {
   name: 'questionSets',
-  columns: [text('requestId'), json('questions'), text('source'), bool('frozen')],
+  columns: [
+    text('requestId'),
+    json('questions'),
+    text('source'),
+    bool('frozen'),
+    bool('stale'), // the intake changed after these were made; regenerate before inviting
+  ],
   uniqueOn: ['requestId'],
   permissions: CLIENT_NONE,
 }
@@ -73,6 +80,9 @@ export const invitesSchema: CollectionSchema = {
     text('claimedBy'),
     when('claimedAt'),
     text('claimedEmail'),
+    when('sentAt'), // shown to the student as status
+    when('cancelledAt'), // the student cancelled it, or its email failed to send
+    when('replacedAt'), // a resend superseded it
   ],
   uniqueOn: ['tokenHash'],
   permissions: CLIENT_NONE,
@@ -100,7 +110,8 @@ export const draftsSchema: CollectionSchema = {
     text('requestId'),
     json('assembly'), // Assembly (paragraphs with per-sentence sources)
     json('flags'), // Flag[] from claimCheck
-    json('edits'), // recommender's edited sentences, keyed "p:s"
+    json('edits'), // recommender's edited sentences, keyed by stable sentence id
+    json('notes'), // string[] from the last finish (drafting fallbacks, edits not carried over)
     num('assemblyCount'), // cap on LLM call 2
     when('updatedAt'),
   ],

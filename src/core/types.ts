@@ -79,6 +79,12 @@ export type Answers = Record<string, AnswerValue>;
 
 /** LLM call 2 output, after validation. */
 export interface AssembledSentence {
+  /**
+   * Stable id, assigned by Reccer (never the model) from the sentence's paragraph, sources, and
+   * original text. Edits and flags are keyed by it, so they survive re-sorting, duplicate
+   * sentences, and a re-finish that produces the same sentence again.
+   */
+  id: string;
   text: string;
   sources: string[]; // question ids this sentence came from
 }
@@ -104,9 +110,13 @@ export type FlagKind =
 
 export interface Flag {
   kind: FlagKind;
-  /** Index path into the assembly, or null for answer-level flags. */
+  /** The flagged sentence's stable id, or null for answer-level flags. This is the key to use. */
+  sentenceId: string | null;
+  /** Position in the stored assembly at check time, for display only. Null for answer-level flags. */
   paragraph: number | null;
   sentence: number | null;
+  /** True when the check ran on the recommender's own edit: a note to them, not a problem to fix. */
+  advisory?: boolean;
   token?: string;
   questionId?: string;
   message: string;

@@ -13,22 +13,23 @@ Owner: Avi (Avinash Kottakota). Stage 1 was built in a sandbox with no network, 
 
 | Area | Status | How it was checked |
 |---|---|---|
-| `src/core/` (question bank, leading-question validator, prompts, assembly, claim check, letters, form answers, invite tokens, emails, exports) | **Done, tested** | 13 unit tests, strict `tsc` |
-| `src/actions/logic.ts` (every server action and every permission rule) | **Done, tested** | 12 tests against an in-memory runtime, including the full student-to-recommender path |
+| `src/core/` (question bank, leading-question validator, prompts, assembly, sentence ids, claim check, letters, form answers, invite tokens, emails, reminders, autosave) | **Done, tested** | `tests/core.test.ts`, `regressions.test.ts`, `features.test.ts`; strict `tsc` |
+| `src/actions/logic.ts` (every server action and every permission rule) | **Done, tested** | Against an in-memory runtime: the full student-to-recommender path, a forced concurrent double claim, edit preservation across re-finish, intake edit, invite cancel and resend, reminders. 64 unit tests in all |
 | `.docx` export | **Done, tested** | Generates a valid Word file in Node; browser path uses `Packer.toBlob` |
-| `src/actions/deepspace.ts` (SDK adapter) | **Done, verified locally** | Checked against installed deepspace 0.44.2 types; 9 adapter tests; real Anthropic + record calls under `deepspace test run` |
-| `src/schemas.ts`, `src/schemas/reccer-schemas.ts` | **Done** | Real `CollectionSchema`s, all client-none; scaffold `users` kept |
+| `src/actions/deepspace.ts` (SDK adapter) | **Done, verified locally** | Checked against installed deepspace 0.44.2 types; 15 adapter tests (fake drops undeclared fields, as the RecordRoom does); real Anthropic + record calls under `deepspace test run` |
+| `src/schemas.ts`, `src/schemas/reccer-schemas.ts` | **Done** | Real `CollectionSchema`s, all client-none; scaffold `users` kept; stage 2 columns added (section 5) |
 | `src/lib/api.ts` (client transport) | **Done, verified locally** | `POST /api/actions/<name>` with `getAuthToken()` bearer |
-| Pages, routing, auth boundary, fonts | **Done, verified locally** | Under `src/pages/(app)/(protected)/`; three-account Playwright run (`tests/reccer.spec.ts`) |
+| Pages, routing, auth boundary, fonts | **Done, verified locally** | Under `src/pages/(app)/(protected)/`; three-account Playwright run (`tests/reccer.spec.ts`), plus a second flow: reopen and edit, resend, cancel, status, reminders. Lane 2 pages also driven in headless Chromium against the real `logic.ts` (reopen and edit, cancel and resend, autosave across question switches, duplicate-sentence edits, advisory notes) |
 | Claim link across sign-in | **Done, verified locally** | `src/lib/claimReturn.ts`; simulated OAuth return in `tests/reccer.spec.ts` |
 | App registration | **Done** | `app_01M8AE4W9WV4VFCW5EZXKXCB0H` in `wrangler.toml` (`deepspace app init`) |
+| Deadline reminders | **Done, verified locally** | Daily cron task (`src/cron.ts`); run through the real `buildCronContext` path by the dev trigger in `tests/reccer.spec.ts`; see section 5 |
 | Deploy | **Not started** | Owner runs `DEPLOY.md` from their own checkout; source authority still unclaimed |
 
 What was run and found is in `docs/AGENT_LOG.md`.
 
 ## 2. Architecture in one paragraph
 
-All behavior lives in two SDK-free layers: `core/` (pure functions) and `actions/logic.ts` (server actions written against a small `Runtime` interface: `userId`, `db.get/find/create/put`, `llm`, `email`). The SDK touches the app in exactly three files: `actions/deepspace.ts` (server adapter), `lib/api.ts` (client transport), and `schemas.ts`. So finishing this is mostly "implement the adapter," and the tested logic does not change.
+All behavior lives in two SDK-free layers: `core/` (pure functions) and `actions/logic.ts` (server actions written against a small `Runtime` interface: `userId`, `system`, `db.get/find/create/put`, `llm`, `email`). The SDK touches the app in exactly three files: `actions/deepspace.ts` (server adapter), `lib/api.ts` (client transport), and `schemas.ts`. So finishing this is mostly "implement the adapter," and the tested logic does not change.
 
 ```
 student pages ─┐                       ┌─ core/ (pure, tested)
@@ -63,7 +64,7 @@ Stop and deploy at the end of each step if time is short; each step leaves a wor
 - `npx deepspace integrations list`, then `integrations info openai/chat-completion` (or the catalog's Claude endpoint) and `integrations info email/send`. Fix `LLM_ENDPOINT`, `LLM_MODEL`, and the request/response shapes in `deepspace.ts`.
 - `ls node_modules/deepspace/dist/*.d.ts` and read the server-actions, records, schemas, and worker-auth types. Docs index: `https://docs.deep.space/llms.txt`; any page as Markdown by appending `.md`.
 
-**Step 4: implement the adapter (1–1.5 h).** Translate `schemas.ts` into real schemas (keep the scaffold's `users` schema). Implement `runtimeFrom()` in `deepspace.ts`: identity from the verified JWT, record access (unwrap `record.data` envelopes there), `llm`, `email`. Register the actions. Replace `invoke` in `lib/api.ts`.
+**Step 4: implement the adapter (1–1.5 h).** Translate `schemas.ts` into real schemas (keep the scaffold's `users` schema), including the stage 2 columns (section 5). Implement `runtimeFrom()` in `deepspace.ts`: identity from the verified JWT, record access (unwrap `record.data` envelopes there), `llm`, `email`. Register the actions. Replace `invoke` in `lib/api.ts`.
 
 **Step 5: wire pages (45 min).** Move pages into the scaffold's routing under `src/pages/(app)/` so they sit inside the auth boundary. Load the fonts listed in `styles/reccer.css`. Make `/recommender/claim?token=` survive the sign-in redirect (the token must still be in the URL after OAuth).
 
@@ -73,23 +74,49 @@ Stop and deploy at the end of each step if time is short; each step leaves a wor
 
 ## 5. Known gaps (fine to leave, list them in the writeup)
 
-- The student cannot reopen a saved intake to edit it (there is no student-readable intake action yet). Add `getMyRequestIntake` (owner only, intake + questions, no answers) if time allows.
+- **A forwarded invite link can be claimed by whoever holds it.** This is deliberate: recommenders often sign in with a different address than the one the student typed, so Reccer does not require the login email to match. The consequence is that a student with a second Google or GitHub account could claim their own invite and read the answers. Reccer refuses the student's own account and allows one claim per invite, but it cannot tell that two accounts belong to the same person. Documented, not prevented.
+- **Re-finishing an LLM draft drops most edits.** Edits are kept only where the sentence comes out the same. The deterministic draft is stable, so its edits survive unless the answer changed; the LLM usually rewords, so most edits drop on a re-run. Every dropped edit is quoted back in the draft's notes so the recommender can paste it again.
+- **The claim race is narrowed, not closed.** The SDK has no conditional write, so `claimInvite` writes, re-reads, and repairs the request so exactly one account ends up the recommender (tested with forced interleaving). A `uniqueOn` claims collection would close it fully; see below.
+- **Deadline reminders run daily from cron, verified locally only.** The schedule fires only once deployed; locally the dev trigger runs the same code path. See below.
+- **Reminders to a recommender who has not opened the invite carry no link.** Only the hash of the token is stored, and the cron deliberately does not mint a new claim link. The email points to the original invite email; the student can resend. If that link has expired, only the student is reminded (to resend), and the recommender's reminder waits for a working link.
 - Status updates on the student page use 15-second polling, not realtime, because of rule 2.
 - File uploads (resume PDF) are not built; the fact sheet is pasted text.
-- Deadline reminder emails (cron) are not built.
 - The deterministic fallback draft keeps the recommender's grammar mostly as spoken; the LLM path is what polishes it.
 - The proper-noun check is heuristic (capitalized, not sentence-initial). It can false-positive on capitalized common words; that only produces a flag the recommender can dismiss by editing, never a silent change.
+- The ranking-phrase patterns are heuristic too. A ranking phrased in an unusual way can slip past, and the always-ranking words still flag in ordinary uses ("a rare bug"). Both directions only add or omit a flag; neither changes the letter.
+
+### Stage 2 wiring (done; how it fits together)
+
+**Client actions** registered in `src/actions/deepspace.ts`, all through the same `action()` wrapper and the real transport in `src/lib/api.ts`: `getMyRequestIntake`, `updateIntake`, `cancelInvite`; resend is `sendInvite` again. `saveEdit` takes `{ requestId, sentenceId, text }` (positions are still accepted).
+
+**Deadline reminders run as a DeepSpace cron task.** `src/cron.ts` declares `deadline-reminders`, daily at 09:00 America/New_York (`CronTask`, verified in `deepspace/dist/worker.d.ts`); `worker.ts`'s `AppCronRoom` runs it. The task calls `runDeadlineReminders(env)` in `deepspace.ts`, which builds the SDK's `CronContext` on the same RecordRoom the actions use (`app:<DEEPSPACE_APP_ID>`), wraps it in a `Runtime` with `system: true` (the only place that is ever set), and calls `L.sendDeadlineReminders`. Email from cron is billed to the owner through `APP_OWNER_JWT`. The function is not a client action, and it refuses any runtime without `system`. It logs a content-free `{ checked, sent, failed }`.
+
+**Manual run in dev:** `POST /api/dev/cron/deadline-reminders` (`src/server/dev-outbox-route.ts`) runs the same task now. It returns 404 unless `ALLOW_DEBUG_ROUTES === "true"` (set by `deepspace dev`/`test`, never on deploy), needs a verified `@deepspace.test` caller, and emails only `@deepspace.test` recipients; everyone else is skipped and left unmarked. `tests/reccer.spec.ts` uses it. A deployed app has no manual trigger; the CronRoom's own admin monitor (`useCronMonitor`) is the SDK's way to watch or trigger runs there.
+
+**Conditional write for claims:** the SDK's action tools have no conditional update or transaction (`create/update/remove/deleteWhere/get/query` only), so `claimInvite` keeps its write, re-read, and repair. The one atomic primitive is `uniqueOn`: a `claims` collection unique on `requestId` would turn the claim into a true compare-and-set. That is the next step if the window matters.
+
+**Schema columns added by stage 2**, in `src/schemas/reccer-schemas.ts` (the RecordRoom silently drops undeclared fields; `tests/adapter.test.ts` now fakes that, so a missing column fails a test):
+
+| Collection | Column | Type | Written by |
+|---|---|---|---|
+| `requests` | `remindersSent` | json (string[]) | `sendDeadlineReminders` |
+| `questionSets` | `stale` | boolean | `updateIntake`, `generateQuestions` |
+| `invites` | `sentAt`, `cancelledAt`, `replacedAt` | datetime | `sendInvite`, `cancelInvite` |
+| `drafts` | `notes` | json (string[]) | `finishInterview` |
+| `drafts` | `edits` | json, keyed by sentence id | `saveEdit` |
+
+**Scale limit:** the reminder scan queries `requests` by `status` with no paging. The RecordRoom scans at most 5,000 rows per call, which is far above this app's size; past it, page by `offset`.
 
 ## 6. Commands (in this folder)
 
 ```bash
 npm install            # tsx, typescript, docx, @types/node
-npm test               # 34 tests: core + actions + docx + adapter
+npm test               # 64 tests: core, actions, docx, adapter, regressions, features
 npm run typecheck      # strict tsc over core, logic, fixtures, tests; then the whole app
 npm run demo           # end-to-end on fictional data -> demo-output/
 ```
 
-`tsconfig.core.json` covers the SDK-free code and tests. `npx deepspace test run e2e` runs the Playwright specs.
+`tsconfig.core.json` covers the SDK-free code and tests. `npx deepspace test run e2e` runs the Playwright specs (13, including the two Reccer flows in `tests/reccer.spec.ts`).
 
 ## 7. Files
 

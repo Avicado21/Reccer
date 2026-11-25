@@ -13,7 +13,7 @@ A student sets up a request with their programs and due dates. Their recommender
 - Deploying: [`DEPLOY.md`](DEPLOY.md).
 
 ```bash
-npm install && npm test   # 34 tests
+npm install && npm test   # 64 tests
 npm run demo              # end-to-end on fictional data -> demo-output/
 ```
 
