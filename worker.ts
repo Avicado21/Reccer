@@ -144,9 +144,15 @@ registerActionRoutes(app, resolveAuth)
 registerDevOutboxRoute(app, resolveAuth)
 // Every scaffold exposes selected tools through HTTP, MCP and browser tools.
 // Only copilot owns the collections needed for the in-app chat UI.
+// Reccer: the local-assistant surface (/_deepspace/agent, HTTP + MCP) is off.
+// Reccer does not use it, and its records.* tools could only ever see the
+// scaffold's users/settings rows (every Reccer collection is client-none), so
+// it is attack surface with no product use. Unregistered, /_deepspace/agent*
+// falls through to the exact-allowlist platform proxy below and 404s.
 registerAgent(app, {
   tools: buildTools,
   inApp: schemas.some((schema) => schema.name === AI_CHATS_SCHEMA.name),
+  local: false,
 })
 registerPlatformProxyRoutes(app)
 registerStaticRoutes(app)

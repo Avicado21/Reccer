@@ -6,11 +6,19 @@
  * - 'developer': The app owner pays (default).
  * - 'user': The calling user pays.
  *
- * Every integration requires a signed-in caller. Set `anonymous: true` on a
- * 'developer' integration to let signed-out visitors call it too — the owner
- * then pays for anyone who can reach the app.
+ * Browser proxy (`/api/integrations/:name/:endpoint`): a 'developer'
+ * integration is SERVER-ONLY unless it sets `browser: true`. Server actions
+ * (`tools.integration`) and cron (`cron.integrations.call`) never go through
+ * that proxy, so they are unaffected. Without this, any signed-in account
+ * could spend the owner's credits directly, bypassing the app's own caps.
+ * 'user' integrations bill the caller and stay reachable from the browser.
  *
- * Integrations not listed here default to 'developer' with sign-in required.
+ * Browser-exposed integrations require a signed-in caller. Set
+ * `anonymous: true` on a `browser: true` 'developer' integration to let
+ * signed-out visitors call it too — the owner then pays for anyone who can
+ * reach the app.
+ *
+ * Integrations not listed here default to 'developer', server-only.
  *
  * IMPORTANT: any integration backed by per-user connected accounts (Google,
  * Composio) must be 'user' — the api-worker resolves the account from the
@@ -22,15 +30,27 @@
 
 export const integrations: Record<
   string,
-  { billing: 'developer' | 'user'; anonymous?: boolean }
+  { billing: 'developer' | 'user'; browser?: boolean; anonymous?: boolean }
 > = {
   // Scaffold defaults (unused by Reccer, kept so per-user accounts never bill the owner).
   google: { billing: 'user' },
   composio: { billing: 'user' },
-  // Reccer. Owner pays, never anonymous: every call is made by a server action
-  // behind sign-in, and capped per request (MAX_GENERATIONS, MAX_ASSEMBLIES).
+  // Reccer. Owner pays, server-only (no `browser`): every call is made by a
+  // server action behind sign-in and capped per request (MAX_GENERATIONS,
+  // MAX_ASSEMBLIES), or by the reminder cron. No Reccer page calls the proxy.
   anthropic: { billing: 'developer' },
   email: { billing: 'developer' },
+}
+
+/**
+ * May the browser proxy forward this integration at all? 'user' billing bills
+ * the caller; 'developer' billing needs an explicit `browser: true` opt-in.
+ * Unlisted integrations default to 'developer', so they are refused.
+ */
+export function browserMayCall(name: string): boolean {
+  const config = Object.hasOwn(integrations, name) ? integrations[name] : undefined
+  if (!config) return false
+  return config.billing === 'user' || config.browser === true
 }
 
 // Verified with `npx deepspace integrations info anthropic/chat-completion`

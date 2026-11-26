@@ -29,7 +29,7 @@ import {
   nativeAuthToken,
 } from 'deepspace/worker'
 import type { ExpoAuthBridgeOptions, JwtVerifierConfig, VerifyResult } from 'deepspace/worker'
-import { integrations } from '../integrations.js'
+import { browserMayCall, integrations } from '../integrations.js'
 import type { AppContext, Env } from '../../worker.js'
 
 function jwtConfig(env: Env): JwtVerifierConfig {
@@ -239,6 +239,14 @@ export function registerAuthAndIntegrationRoutes(app: Hono<AppContext>): void {
     if (!target) return c.json({ error: 'Unknown integration' }, 404)
     const config = lookupOwn(integrations, integrationName)
     const billingMode = config?.billing ?? 'developer'
+
+    // Reccer: owner-billed integrations are server-only unless src/integrations.ts
+    // opts one into the browser (`browser: true`). Server actions and cron call
+    // the api-worker directly, never this route, so their capped paths are
+    // unaffected; this closes the direct, uncapped path for signed-in callers.
+    if (!browserMayCall(integrationName)) {
+      return c.json({ error: 'This integration is not available from the browser' }, 403)
+    }
 
     // Sign-in is required unless the app opts this integration into anonymous
     // use; developer billing would otherwise let any visitor spend the owner's

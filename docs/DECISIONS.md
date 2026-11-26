@@ -26,6 +26,8 @@
 
 **Caps on paid calls.** Three generations per request, three assemblies per draft, all behind sign-in. Owner-billed integrations accept anonymous callers, so sign-in alone is not spend control.
 
+**Owner-billed integrations are server-only; the scaffold's agent tool surface is off.** The browser proxy `/api/integrations/:name/:endpoint` refuses every developer-billed integration without `browser: true` in `src/integrations.ts` (none has it), so a signed-in account cannot call Anthropic or email directly and skip the caps; `registerAgent` runs with `local: false` because Reccer has no use for `/_deepspace/agent`.
+
 **Reminders run only from the scheduler, and carry no new claim link.** `sendDeadlineReminders` reads across every request, so it refuses any runtime that is not the scheduled job's. Minting a fresh claim link from a cron would put a working credential in an email nobody asked for; the reminder points to the original invite instead, and the student can resend.
 
 **Dictation in the browser, not on the server.** Device dictation or the Web Speech API. No audio of someone discussing a student reaches the server. Cost: Firefox lacks the Dictate button; typing and OS dictation still work.

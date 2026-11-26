@@ -21,6 +21,7 @@ Reccer: AI assisted, not AI generated letters of recommendation. A student sets 
 - **firstmate + Opus, stage 2, lane 1 (SDK):** <scaffold, verified integrations, implemented the adapter and schemas, routing, deploy. Pull from AGENT_LOG.md.>
 
 ## What I verified or changed myself
+- Sent a real invite from the deployed app (https://reccer.app.space) and confirmed it reached a real person's inbox. I am currently testing the full flow on the live app with my actual professor and recommenders: they receive the invite, sign in with their own accounts, answer the interview, and get the draft.
 - <e.g. ran the two-account acceptance tests on the deployed URL: results>
 - <e.g. checked the student could not reach answers or drafts by URL>
 - <e.g. caught and fixed: …>
