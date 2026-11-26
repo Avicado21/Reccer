@@ -1,5 +1,5 @@
 // In-memory Runtime for testing action logic and permissions without the SDK.
-import type { Coll, Row, Runtime } from "../src/actions/logic";
+import type { Coll, EmailOut, Row, Runtime } from "../src/actions/logic";
 import type { ChatMessage } from "../src/core/index";
 
 export function makeWorld(opts: { llm?: (m: ChatMessage[]) => string | null } = {}) {
@@ -7,7 +7,7 @@ export function makeWorld(opts: { llm?: (m: ChatMessage[]) => string | null } = 
     requests: new Map(), questionSets: new Map(), invites: new Map(), answers: new Map(), drafts: new Map(),
   };
   let seq = 0;
-  const outbox: { to: string; subject: string; text: string }[] = [];
+  const outbox: EmailOut[] = [];
   const llmCalls: ChatMessage[][] = [];
   const db: Runtime["db"] = {
     async get(c, id) { const r = tables[c].get(id); return r ? structuredClone(r) : null; },

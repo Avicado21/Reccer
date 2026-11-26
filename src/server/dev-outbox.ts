@@ -11,7 +11,7 @@
  * cannot read the recommender's invite (HANDOFF rule 4).
  */
 
-export interface OutboxMessage { to: string; subject: string; text: string; at: string }
+export interface OutboxMessage { to: string; subject: string; text: string; html?: string; replyTo?: string; at: string }
 
 const box: OutboxMessage[] = []
 const MAX = 200
@@ -23,7 +23,7 @@ export function devOutboxEnabled(env: { ALLOW_DEBUG_ROUTES?: string } | undefine
 /** True when this message was captured instead of sent. */
 export function captureDevMail(env: { ALLOW_DEBUG_ROUTES?: string } | undefined, msg: Omit<OutboxMessage, 'at'>): boolean {
   if (!devOutboxEnabled(env) || !msg.to.toLowerCase().endsWith('@deepspace.test')) return false
-  box.push({ ...msg, to: msg.to.toLowerCase(), at: new Date().toISOString() })
+  box.push({ to: msg.to.toLowerCase(), subject: msg.subject, text: msg.text, html: msg.html, replyTo: msg.replyTo, at: new Date().toISOString() })
   if (box.length > MAX) box.splice(0, box.length - MAX)
   return true
 }

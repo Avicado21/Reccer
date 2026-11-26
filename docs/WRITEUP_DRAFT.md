@@ -9,7 +9,7 @@ Reccer: AI assisted, not AI generated letters of recommendation. A student sets 
 **Platform features:** auth (Google or GitHub), records, server actions holding every permission check, per-user ownership, deploy.
 **Integrations:**
 - `anthropic/chat-completion` (Claude Sonnet 5.5), called twice: once to write neutral interview questions, once to clean up and order answers. Both outputs are validated by my code; both fall back to non-LLM paths; both are capped per request and behind sign-in.
-- `email/send`: the invite to the recommender, a status-only notice to the student, and deadline reminders to both (status only for the student).
+- `email/send`: the invite to the recommender, a status-only notice to the student, and deadline reminders to both (status only for the student). The platform always sends from `DeepSpace Apps <notifications@updates.app.space>`, so every email comes with a plain HTML version (a "Start your letter" button on the invite) to look trustworthy, and recommender mail sets `reply_to` to the student so replies reach a person. The student can add an optional note to the recommender, which is quoted in the invite. It is never sent to the model and never appears in the letter.
 **Left out on purpose:** payments, presence, collaborative editing, messaging, Google Workspace, search. None improves a letter (see `docs/DECISIONS.md`).
 
 ## Main tradeoff

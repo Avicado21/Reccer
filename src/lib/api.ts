@@ -44,7 +44,7 @@ export interface MyRequest {
   requestId: string; status: string; intake: StudentIntake; questions: Question[]; questionSource: string | null;
   questionsFrozen: boolean; questionsStale: boolean; editable: boolean; invite: InviteStatus | null;
 }
-export interface Interview { studentName: string; programs: RequestSummary["programs"]; questions: Question[]; answers: Answers; finished: boolean }
+export interface Interview { studentName: string; /** The student's note from the invite email; "" when none. Never used in the letter. */ noteFromStudent?: string; programs: RequestSummary["programs"]; questions: Question[]; answers: Answers; finished: boolean }
 export interface Draft {
   /** flags: unedited sentences. advisories: the same check on the recommender's edits, as notes. */
   assembly: Assembly; flags: Flag[]; advisories: Flag[]; edits: Record<string, string>; notes: string[]; answers: Answers; questions: Question[];

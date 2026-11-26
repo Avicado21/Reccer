@@ -5,12 +5,13 @@
 import { useEffect, useState } from "react";
 import { api, type MyRequest } from "../../../../lib/api";
 import { describeInvite, fmtDate } from "../../../../core/invite";
+import { MAX_NOTE_CHARS } from "../../../../core/email";
 import type { Program, Question, StudentIntake } from "../../../../core/types";
 import "../../../../styles/reccer.css";
 
 type Step = "loading" | "intake" | "review" | "status";
 const blankProgram = (): Program => ({ id: "", school: "", name: "", dueDate: "", submission: "upload", description: "" });
-const blankForm = { studentName: "", preferredName: "", pronouns: "", recommenderName: "", recommenderEmail: "", relationship: "", factSheet: "" };
+const blankForm = { studentName: "", preferredName: "", pronouns: "", recommenderName: "", recommenderEmail: "", relationship: "", factSheet: "", noteToRecommender: "" };
 
 export default function NewRequest() {
   const [requestId, setRequestId] = useState(new URLSearchParams(location.search).get("id") ?? "");
@@ -38,7 +39,7 @@ export default function NewRequest() {
     const i: StudentIntake = m.intake;
     setF({
       studentName: i.studentName, preferredName: i.preferredName ?? "", pronouns: i.pronouns ?? "", recommenderName: i.recommenderName,
-      recommenderEmail: i.recommenderEmail, relationship: i.relationship, factSheet: i.factSheet,
+      recommenderEmail: i.recommenderEmail, relationship: i.relationship, factSheet: i.factSheet, noteToRecommender: i.noteToRecommender ?? "",
     });
     setPrograms(i.programs.map((p) => ({ ...p, description: p.description ?? "" })));
     setQuestions(m.questions);
@@ -191,6 +192,10 @@ export default function NewRequest() {
       <label>Background they might want to look up
         <span className="hint">Projects, dates, numbers. Your recommender sees these only if they ask for a reminder. They are never put into the questions or the letter.</span>
         <textarea rows={7} value={f.factSheet} onChange={set("factSheet")} />
+      </label>
+      <label>A note to your recommender <span className="hint">Optional. Your recommender sees this in the invite email, quoted as a note from you. It is never put into the questions or the letter.</span>
+        <textarea rows={4} maxLength={MAX_NOTE_CHARS} value={f.noteToRecommender} onChange={set("noteToRecommender")} placeholder="Thank you for doing this. The first deadline is in December." />
+        {f.noteToRecommender.length > MAX_NOTE_CHARS * 0.8 && <span className="hint">{f.noteToRecommender.length.toLocaleString("en-US")} of {MAX_NOTE_CHARS.toLocaleString("en-US")} characters</span>}
       </label>
 
       <h2>Programs</h2>

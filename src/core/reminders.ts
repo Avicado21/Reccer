@@ -4,6 +4,7 @@
 
 import type { Program, StudentIntake } from "./types";
 import { fmtDate, sortedByDue } from "./invite";
+import { type EmailMessage, buttonHtml, esc, layoutHtml, listHtml, pHtml, replyToField, smallHtml } from "./email";
 
 /** Remind this many days before the earliest upcoming due date. Tightest window wins. */
 export const REMINDER_WINDOWS_DAYS = [7, 2];
@@ -62,41 +63,54 @@ export function remindersDue(requests: ReminderRequest[], now: Date, windows: nu
 const inDays = (n: number) => (n === 0 ? "today" : n === 1 ? "tomorrow" : `in ${n} days`);
 
 /** To the student. Status only: their own programs and dates, never answers or letter content. */
-export function studentReminderEmail(intake: StudentIntake, due: Pick<DueReminder, "status" | "program" | "daysLeft">, opts: { inviteExpired?: boolean } = {}) {
+export function studentReminderEmail(intake: StudentIntake, due: Pick<DueReminder, "status" | "program" | "daysLeft">, opts: { inviteExpired?: boolean } = {}): EmailMessage {
   const status = due.status !== "invited"
     ? `${intake.recommenderName} has started the interview and has not finished it yet.`
     : opts.inviteExpired
       ? `The invite link expired before ${intake.recommenderName} opened it. Resend it from your requests page so they get a working link.`
       : `${intake.recommenderName} has not opened your invite yet. You can resend it from your requests page, or check in with them yourself.`;
+  const subject = `${due.program.name} letter due ${inDays(due.daysLeft)}: status of your request to ${intake.recommenderName}`;
+  const hi = `Hi ${intake.preferredName || intake.studentName},`;
+  const deadline = `Your earliest letter deadline is ${due.program.name} at ${due.program.school}, due ${fmtDate(due.program.dueDate)} (${inDays(due.daysLeft)}).`;
+  const only = "This message is a status update only. You will not receive the letter.";
   return {
-    subject: `${due.program.name} letter due ${inDays(due.daysLeft)}: status of your request to ${intake.recommenderName}`,
-    text: `Hi ${intake.preferredName || intake.studentName},
-
-Your earliest letter deadline is ${due.program.name} at ${due.program.school}, due ${fmtDate(due.program.dueDate)} (${inDays(due.daysLeft)}).
-
-${status}
-
-This message is a status update only. You will not receive the letter.`,
+    subject,
+    text: `${hi}\n\n${deadline}\n\n${status}\n\n${only}`,
+    html: layoutHtml(subject, [pHtml(esc(hi)), pHtml(esc(deadline)), pHtml(esc(status)), smallHtml(esc(only))].join("\n")),
   };
 }
 
-/** To the recommender. A gentle nudge with every upcoming due date; `link` resumes the interview. */
-export function recommenderReminderEmail(intake: StudentIntake, due: Pick<DueReminder, "status" | "daysLeft">, now: Date, link: string | null) {
-  const lines = sortedByDue(intake.programs)
+/**
+ * To the recommender. A gentle nudge with every upcoming due date; `link` resumes the interview.
+ * Replies go to the student (`studentEmail`, their sign-in address).
+ */
+export function recommenderReminderEmail(
+  intake: StudentIntake, due: Pick<DueReminder, "status" | "daysLeft">, now: Date, link: string | null, studentEmail?: string | null,
+): EmailMessage {
+  const progs = sortedByDue(intake.programs)
     .filter((p) => daysUntil(p.dueDate, now) >= 0)
-    .map((p) => `  - ${p.name}, ${p.school}: due ${fmtDate(p.dueDate)}`);
-  const how = due.status === "in-progress" && link
-    ? `Your answers so far are saved. Pick up where you left off: ${link}`
-    : `To start, use the link in the email titled "${intake.studentName} asked you for a letter of recommendation". If you cannot find it, ask ${intake.preferredName || intake.studentName} to resend it.`;
-  return {
-    subject: `Reminder: ${intake.studentName}'s recommendation, first deadline ${inDays(due.daysLeft)}`,
-    text: `Hi ${intake.recommenderName},
+    .map((p) => `${p.name}, ${p.school}: due ${fmtDate(p.dueDate)}`);
+  const caller = intake.preferredName || intake.studentName;
+  const resume = due.status === "in-progress" && link ? link : null;
+  const findIt = `To start, use the link in the email titled "${intake.studentName} asked you for a letter of recommendation". If you cannot find it, ask ${caller} to resend it.`;
+  const subject = `Reminder: ${intake.studentName}'s recommendation, first deadline ${inDays(due.daysLeft)}`;
+  const hi = `Hi ${intake.recommenderName},`;
+  const intro = `A gentle reminder about the letter of recommendation for ${intake.studentName}. The deadlines are:`;
+  const outro = `If you have already sent your letters, you can ignore this message. ${intake.studentName} cannot see your answers or your letter.`;
+  const text = `${hi}
 
-A gentle reminder about the letter of recommendation for ${intake.studentName}. The deadlines are:
-${lines.join("\n")}
+${intro}
+${progs.map((l) => `  - ${l}`).join("\n")}
 
-${how}
+${resume ? `Your answers so far are saved. Pick up where you left off: ${resume}` : findIt}
 
-If you have already sent your letters, you can ignore this message. ${intake.studentName} cannot see your answers or your letter.`,
-  };
+${outro}`;
+  const html = layoutHtml(subject, [
+    pHtml(esc(hi)),
+    pHtml(esc(intro)),
+    listHtml(progs),
+    ...(resume ? [pHtml("Your answers so far are saved."), buttonHtml("Pick up where you left off", resume)] : [pHtml(esc(findIt))]),
+    smallHtml(esc(outro)),
+  ].join("\n"), { footer: `Sent by Reccer for ${intake.studentName}. Replying to this email reaches ${caller}.` });
+  return { subject, text, html, ...replyToField(studentEmail) };
 }

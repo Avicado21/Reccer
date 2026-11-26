@@ -124,6 +124,9 @@ export default function InterviewPage() {
           Answer in full sentences, as if you were writing the letter. More detail is better; the draft trims it. {data.studentName} cannot see your answers.
         </p>
       )}
+      {i === 0 && answered === 0 && data.noteFromStudent && (
+        <div className="memory"><strong>A note from {data.studentName}:</strong>{"\n"}{data.noteFromStudent}</div>
+      )}
       <div className="progress">Question {i + 1} of {data.questions.length}, {answered} answered</div>
       <p className="question" key={q.id}>{askFollowUp ? FOLLOW_UP : q.prompt}</p>
       {!askFollowUp && <p className="opener">Start with: “{q.opener}”</p>}

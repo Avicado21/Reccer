@@ -181,6 +181,11 @@ test("full path through the adapter: envelopes, booleans, emails, permissions", 
   const link = w.mail[0].text.match(/https:\/\/reccer\.app\.space\/recommender\/claim\?token=([A-Za-z0-9_-]+)/);
   assert.ok(link, w.mail[0].text);
   assert.equal(w.mail[0].to, REC.email);
+  // email/send body: html alongside text, replies to the student (field name from `integrations info email/send`).
+  assert.equal(w.mail[0].reply_to, STUDENT.email);
+  assert.match(w.mail[0].html, /Start your letter/);
+  assert.ok(w.mail[0].html.includes(link[0]), "the button links to the same URL as the text");
+  assert.ok(!("replyTo" in w.mail[0]), "only the provider's field name is sent");
   // Stored boolean is 0/1, read back as frozen=true: removing a question is now refused.
   const qs = [...w.table("questionSets").values()][0];
   assert.equal(qs.data.frozen, 1);
@@ -206,6 +211,8 @@ test("full path through the adapter: envelopes, booleans, emails, permissions", 
   assert.equal(fin.data.mode, "deterministic");
   assert.equal(w.mail.at(-1).to, STUDENT.email); // completion email, status only
   assert.doesNotMatch(w.mail.at(-1).text, /supervised Jordan/);
+  assert.ok(w.mail.at(-1).html && !w.mail.at(-1).html.includes("supervised Jordan"));
+  assert.ok(!("reply_to" in w.mail.at(-1)), "student mail has no reply-to");
 
   const d = await w.call("getDraft", REC, { requestId });
   assert.equal(d.success, true);
@@ -354,6 +361,11 @@ test("scheduled job: daily task, cron Runtime over the RecordRoom, reminders mar
   assert.equal(res.checked, 1);
   assert.deepEqual(res.sent.map((x) => x.to).sort(), ["recommender", "student"]);
   assert.deepEqual(w.mail.slice(before).map((m) => m.to).sort(), [REC.email, STUDENT.email].sort());
+  const recMail = w.mail.slice(before).find((m) => m.to === REC.email)!;
+  const stuMail = w.mail.slice(before).find((m) => m.to === STUDENT.email)!;
+  assert.equal(recMail.reply_to, STUDENT.email, "cron path sets reply_to on recommender mail");
+  assert.ok(recMail.html && stuMail.html);
+  assert.ok(!("reply_to" in stuMail));
   assert.equal((w.table("requests").get(requestId)!.data.remindersSent as string[]).length, 2, "requests.remindersSent persisted");
   assert.equal((await L.sendDeadlineReminders(rt)).sent.length, 0, "not sent twice in one window");
 

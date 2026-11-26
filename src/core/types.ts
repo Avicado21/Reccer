@@ -71,6 +71,11 @@ export interface StudentIntake {
   /** Free text: resume highlights, projects, numbers. Becomes memoryJog only. */
   factSheet: string;
   programs: Program[];
+  /**
+   * Optional personal note from the student, quoted in the invite email (and shown at the start
+   * of the interview). Never sent to the model, never in the questions or the letter.
+   */
+  noteToRecommender?: string;
 }
 
 export type AnswerValue = { text: string; followUp?: string } | "SKIPPED";

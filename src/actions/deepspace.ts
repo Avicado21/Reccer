@@ -106,6 +106,19 @@ export function completionText(data: unknown): string | null {
   return typeof alt === 'string' && alt ? alt : null
 }
 
+/**
+ * The email/send body (`npx deepspace integrations info email/send`: from, to, subject, html,
+ * text, reply_to, cc, bcc). `from` is ignored by DeepSpace but kept; reply_to is how replies
+ * reach the student. Optional fields are omitted when empty.
+ */
+export function emailSendBody(m: L.EmailOut) {
+  return {
+    from: EMAIL_FROM, to: m.to, subject: m.subject, text: m.text,
+    ...(m.html ? { html: m.html } : {}),
+    ...(m.replyTo ? { reply_to: m.replyTo } : {}),
+  }
+}
+
 export function runtimeFrom(ctx: ActionContext<AdapterEnv>, userEmail: string | null): Runtime {
   const tools: ActionTools = ctx.tools
   const env = ctx.env ?? {}
@@ -144,10 +157,10 @@ export function runtimeFrom(ctx: ActionContext<AdapterEnv>, userEmail: string | 
       const text = completionText(r.data)
       return text ? { ok: true, text } : { ok: false, error: 'empty completion' }
     },
-    async email({ to, subject, text }) {
+    async email(msg) {
       // Local dev only: mail to @deepspace.test accounts is held for the recipient instead of sent.
-      if (captureDevMail(env, { to, subject, text })) return { ok: true }
-      const r = await tools.integration('email/send', { from: EMAIL_FROM, to, subject, text })
+      if (captureDevMail(env, msg)) return { ok: true }
+      const r = await tools.integration('email/send', emailSendBody(msg))
       return r.success ? { ok: true } : { ok: false, error: r.error }
     },
   }
@@ -232,10 +245,10 @@ export function cronRuntime(cron: CronContext, env: AdapterEnv): Runtime {
     async llm() {
       return { ok: false, error: 'the model is not used by scheduled jobs' }
     },
-    async email({ to, subject, text }) {
-      if (captureDevMail(env, { to, subject, text })) return { ok: true }
+    async email(msg) {
+      if (captureDevMail(env, msg)) return { ok: true }
       try {
-        await cron.integrations.call('email/send', { from: EMAIL_FROM, to, subject, text })
+        await cron.integrations.call('email/send', emailSendBody(msg))
         return { ok: true }
       } catch (e) {
         return { ok: false, error: e instanceof Error ? e.message : String(e) }

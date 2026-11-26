@@ -8,7 +8,7 @@ import {
   questionGenerationMessages, assemblyMessages, validateAssembly, deterministicAssembly,
   claimCheck, adviseOnEdit, buildLetters, buildFormAnswers, newInviteToken, hashToken, inviteEmail, completionEmail,
   assignSentenceIds, sentenceIndex, remindersDue, reminderKey, studentReminderEmail, recommenderReminderEmail,
-  REMINDER_WINDOWS_DAYS,
+  REMINDER_WINDOWS_DAYS, MAX_NOTE_CHARS, cleanNote,
   type Answers, type Assembly, type ChatMessage, type Flag, type Program, type Question, type StudentIntake,
 } from "../core/index";
 import { MAX_ASSEMBLIES, MAX_GENERATIONS, INVITE_TTL_DAYS } from "../integrations";
@@ -36,8 +36,11 @@ export interface Runtime {
     put(c: Coll, id: string, patch: Record<string, unknown>): Promise<void>;
   };
   llm(messages: ChatMessage[]): Promise<{ ok: true; text: string } | { ok: false; error: string }>;
-  email(msg: { to: string; subject: string; text: string }): Promise<{ ok: boolean; error?: string }>;
+  /** Plain text is the fallback body; `html` the rich one; `replyTo` where replies go (email/send reply_to). */
+  email(msg: EmailOut): Promise<{ ok: boolean; error?: string }>;
 }
+
+export interface EmailOut { to: string; subject: string; text: string; html?: string; replyTo?: string }
 
 export class ActionError extends Error {
   constructor(public code: "unauthenticated" | "forbidden" | "not_found" | "invalid" | "limit" | "conflict", message: string) {
@@ -75,6 +78,8 @@ async function asRecommender(rt: Runtime, requestId: string) {
 }
 
 const intakeOf = (r: Row) => r.intake as StudentIntake;
+/** The student's sign-in email, stored at createRequest. Reply-to for recommender mail. */
+const studentEmailOf = (r: Row) => (typeof r.studentEmail === "string" && r.studentEmail ? r.studentEmail : null);
 
 async function questionSetOf(rt: Runtime, requestId: string): Promise<Row | null> {
   return (await rt.db.find("questionSets", { requestId }))[0] ?? null;
@@ -144,6 +149,11 @@ export function validateIntake(i: StudentIntake): string[] {
     if (!DATE_RE.test(p.dueDate ?? "")) e.push(`Program ${n + 1}: add a due date.`);
   });
   if ((i?.factSheet ?? "").length > 8000) e.push("Shorten the background notes to under 8,000 characters.");
+  const note = (i as { noteToRecommender?: unknown })?.noteToRecommender;
+  if (note != null && typeof note !== "string") e.push("The note to your recommender must be text.");
+  else if (typeof note === "string" && note.replace(/\r\n?/g, "\n").trim().length > MAX_NOTE_CHARS) {
+    e.push(`Shorten the note to your recommender to ${MAX_NOTE_CHARS.toLocaleString("en-US")} characters or fewer.`);
+  }
   return e;
 }
 
@@ -190,6 +200,8 @@ export function cleanIntake(raw: StudentIntake): StudentIntake {
   const pronouns = optStr(i.pronouns);
   if (preferredName) out.preferredName = preferredName;
   if (pronouns) out.pronouns = pronouns;
+  const note = cleanNote(str(i.noteToRecommender));
+  if (note) out.noteToRecommender = note;
   return out;
 }
 
@@ -291,7 +303,7 @@ export async function sendInvite(rt: Runtime, { requestId }: { requestId: string
     requestId, email: intake.recommenderEmail, tokenHash: await hashToken(token),
     sentAt: now, expiresAt: expires.toISOString(), claimedBy: null, claimedAt: null, cancelledAt: null, replacedAt: null,
   });
-  const mail = inviteEmail(intake, `${rt.appUrl}/recommender/claim?token=${token}`, (qs.questions as Question[]).length);
+  const mail = inviteEmail(intake, `${rt.appUrl}/recommender/claim?token=${token}`, (qs.questions as Question[]).length, studentEmailOf(r));
   const sent = await rt.email({ to: intake.recommenderEmail, ...mail });
   if (!sent.ok) {
     // The new link never reached anyone; retire it and leave any earlier link working.
@@ -434,6 +446,8 @@ export async function getInterview(rt: Runtime, { requestId }: { requestId: stri
   const i = intakeOf(r);
   return {
     studentName: i.studentName,
+    /** The student's note from the invite email, for the recommender only. Never used in the letter. */
+    noteFromStudent: i.noteToRecommender ?? "",
     programs: i.programs.map((p) => ({ name: p.name, school: p.school, dueDate: p.dueDate })),
     questions: (qs?.questions as Question[]) ?? [],
     answers: await answersOf(rt, requestId),
@@ -614,7 +628,7 @@ export async function sendDeadlineReminders(rt: Runtime, { windows = REMINDER_WI
       if (!to) { failed.push({ requestId: r.id, to: who, error: "no email address on file" }); continue; }
       const mail = who === "student"
         ? studentReminderEmail(intake, rem, { inviteExpired })
-        : recommenderReminderEmail(intake, rem, rt.now(), rem.status === "in-progress" ? `${rt.appUrl}/recommender/interview?id=${r.id}` : null);
+        : recommenderReminderEmail(intake, rem, rt.now(), rem.status === "in-progress" ? `${rt.appUrl}/recommender/interview?id=${r.id}` : null, studentEmailOf(r));
       const res = await rt.email({ to, ...mail });
       if (res.ok) { keys.push(reminderKey(rem.program.dueDate, rem.window, who)); sent.push({ requestId: r.id, to: who, window: rem.window }); }
       else failed.push({ requestId: r.id, to: who, error: res.error ?? "send failed" });

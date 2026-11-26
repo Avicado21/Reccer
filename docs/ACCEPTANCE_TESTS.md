@@ -9,7 +9,7 @@ Use three accounts: **S** (student), **R** (recommender), **X** (outsider). Use 
 2. S creates a request with two programs (different due dates) and a fact sheet containing a project name and a number.
 3. Questions appear. None of them contains the project name, the number, or praise words. Fixed questions have no Remove button.
 4. S removes one generated question, then sends the invite.
-5. R's inbox: the email is from `DeepSpace Apps <notifications@updates.app.space>` (the platform ignores any other sender), lists both programs with the earliest due date first, and says the student cannot see the answers.
+5. R's inbox: the email is from `DeepSpace Apps <notifications@updates.app.space>` (the platform ignores any other sender), lists both programs with the earliest due date first, and says the student cannot see the answers. It shows as formatted HTML with a "Start your letter" button, and the button opens the same link as the one printed under it. If S wrote a note to the recommender in step 2, it appears quoted under "A note from <S's name>:"; without a note, there is no note section. Replying to the email addresses S's sign-in email.
 6. R opens the link, signs in, and lands on question 1. The link still works after the sign-in redirect.
 7. R gives a one-sentence answer: the follow-up question appears once, then moves on.
 8. R taps "Show the student's notes" on a question with notes; the notes appear.

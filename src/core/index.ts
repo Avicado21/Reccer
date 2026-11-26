@@ -9,3 +9,4 @@ export * from "./invite";
 export * from "./export/text";
 export * from "./reminders";
 export * from "./autosave";
+export * from "./email";
